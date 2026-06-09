@@ -1,16 +1,25 @@
 // Edge function: /refresh-stock/:ticker
-// Fetches fundamentals (FMP) + real-time price/insiders (Finnhub) through the
-// TTL cache, computes Quality + Value scores, and writes them to Supabase.
-// API keys live ONLY in this function's env — never shipped to the client.
+// Primary (free) pipeline: Finnhub financials-reported (statements -> self-
+// computed Piotroski / Altman / DCF / ROIC) + Finnhub metric (valuation ratios)
+// + Finnhub quote (real-time price). FMP is the fallback when Finnhub has no
+// statements. All keys stay server-side (env or Vault) — never client-shipped.
+// (SEC EDGAR was the original statements source but is blocked from edge egress.)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { CORS_HEADERS, fetchWithCache, getSecret, json, sleep } from "../_shared/cache.ts";
 import { computeQualityScore, computeValueScore } from "../_shared/scoring.ts";
+import { parseFinnhubStatements } from "../_shared/finnhubStatements.ts";
+import { computeAltman, computeDCF, computePiotroski, computeRoicSeries } from "../_shared/fundamentals.ts";
+import { parseFinnhubMetric } from "../_shared/finnhub.ts";
+import { isFiniteNum } from "../_shared/math.ts";
 
 const FMP = "https://financialmodelingprep.com";
 const FINNHUB = "https://finnhub.io";
 const FMP_BUDGET = { provider: "fmp", dailyLimit: 250 };
-const FH_BUDGET = { provider: "finnhub", dailyLimit: 50000 }; // 60/min ~ effectively unbounded daily
+const FH_BUDGET = { provider: "finnhub", dailyLimit: 50000 };
 const DAY = 86400, WEEK = 604800;
+
+// deno-lint-ignore no-explicit-any
+type Any = any;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
@@ -24,64 +33,102 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
-
-    const fmpKey = await getSecret(supabase, "FMP_API_KEY");
     const fhKey = await getSecret(supabase, "FINNHUB_API_KEY");
-    if (!fmpKey) return json({ error: "FMP_API_KEY not configured" }, 500);
+    const fmpKey = await getSecret(supabase, "FMP_API_KEY");
 
-    // FMP's /stable API (the /api/v3 endpoints were retired Aug 31, 2025).
-    // Stable uses ?symbol=TICKER rather than a path segment.
-    const fmp = (path: string) => `${FMP}/stable/${path}${path.includes("?") ? "&" : "?"}apikey=${fmpKey}`;
-    const get = (endpoint: string, url: string, ttl: number, budget = FMP_BUDGET) =>
+    const get = (endpoint: string, url: string, ttl: number, budget = FH_BUDGET) =>
       fetchWithCache(supabase, ticker, endpoint, url, ttl, budget).then((r) => r.data).catch(() => null);
 
-    // FMP free tier throttles parallel bursts, so fetch its endpoints
-    // SEQUENTIALLY with light pacing. Each is cached independently (24h).
-    const fmpEndpoints: [string, string][] = [
-      ["fmp:income", `income-statement?symbol=${ticker}&period=annual&limit=5`],
-      ["fmp:balance", `balance-sheet-statement?symbol=${ticker}&period=annual&limit=5`],
-      ["fmp:cashflow", `cash-flow-statement?symbol=${ticker}&period=annual&limit=5`],
-      ["fmp:metrics", `key-metrics?symbol=${ticker}&period=annual&limit=5`],
-      ["fmp:ratios", `ratios?symbol=${ticker}&period=annual&limit=5`],
-      ["fmp:score", `financial-scores?symbol=${ticker}`],
-      ["fmp:dcf", `discounted-cash-flow?symbol=${ticker}`],
-      ["fmp:profile", `profile?symbol=${ticker}`],
-    ];
-    const fmpData: Record<string, unknown> = {};
-    for (let i = 0; i < fmpEndpoints.length; i++) {
-      const [ep, path] = fmpEndpoints[i];
-      fmpData[ep] = await get(ep, fmp(path), DAY);
-      if (i < fmpEndpoints.length - 1) await sleep(300);
-    }
-    const income = fmpData["fmp:income"], balance = fmpData["fmp:balance"],
-      cashflow = fmpData["fmp:cashflow"], metrics = fmpData["fmp:metrics"],
-      ratios = fmpData["fmp:ratios"], score = fmpData["fmp:score"],
-      dcf = fmpData["fmp:dcf"], profile = fmpData["fmp:profile"];
+    const { data: wl } = await supabase.from("watchlist").select("cik, sector").eq("ticker", ticker).maybeSingle();
+    const cik = wl?.cik as string | undefined;
+    // Altman Z and FCF-based DCF are not meaningful for banks / REITs (no working
+    // capital, OCF distorted by loan & deposit flows) — exclude rather than distort.
+    const isFinancial = wl?.sector === "Financials" || wl?.sector === "Real Estate";
 
-    // Finnhub is a separate provider/budget — fine to run in parallel.
-    const [esg, insiders] = await Promise.all([
-      fhKey ? get("fh:esg", `${FINNHUB}/api/v1/stock/esg?symbol=${ticker}&token=${fhKey}`, WEEK, FH_BUDGET) : null,
-      fhKey ? get("fh:insiders", `${FINNHUB}/api/v1/stock/insider-transactions?symbol=${ticker}&token=${fhKey}`, DAY, FH_BUDGET) : null,
-    ]);
-
-    // Real-time price (Finnhub quote, short TTL) — fall back to FMP profile price.
-    let price: number | undefined;
+    // ---- Finnhub: valuation metrics, statements, insiders, real-time price ----
+    let metricResp: Any = null, financialsResp: Any = null, insiders: Any = null, price: number | undefined;
     if (fhKey) {
-      const quote = await get("fh:quote", `${FINNHUB}/api/v1/quote?symbol=${ticker}&token=${fhKey}`, 60, FH_BUDGET) as
-        { c?: number } | null;
+      metricResp = await get("fh:metric", `${FINNHUB}/api/v1/stock/metric?symbol=${ticker}&metric=all&token=${fhKey}`, DAY);
+      financialsResp = await get("fh:financials", `${FINNHUB}/api/v1/stock/financials-reported?symbol=${ticker}&freq=annual&token=${fhKey}`, WEEK);
+      insiders = await get("fh:insiders", `${FINNHUB}/api/v1/stock/insider-transactions?symbol=${ticker}&token=${fhKey}`, DAY);
+      const quote = await get("fh:quote", `${FINNHUB}/api/v1/quote?symbol=${ticker}&token=${fhKey}`, 60) as { c?: number } | null;
       if (quote && typeof quote.c === "number" && quote.c > 0) price = quote.c;
     }
+    const fh = parseFinnhubMetric(metricResp);
 
-    // Latest 10Y treasury yield from the regime refresh cache (decimal).
+    // 10Y treasury (decimal) from the regime cache, for earnings-yield-vs-bond.
     const { data: t10row } = await supabase.from("api_cache").select("data").eq("endpoint", "av:treasury_10y").maybeSingle();
     const t10raw = (t10row?.data as { data?: { value: string }[] } | undefined)?.data?.[0]?.value;
     const treasury10y = t10raw ? parseFloat(t10raw) / 100 : undefined;
 
-    const quality = computeQualityScore({
-      income, balance, cashflow, metrics, ratios, score,
-      insiders: insiders as { data?: Record<string, unknown>[] } ?? undefined,
-    });
-    const value = computeValueScore({ income, metrics, ratios, dcf, profile, price, treasury10y });
+    // ---- Statements from Finnhub financials-reported -> self-computed scores ----
+    const records = parseFinnhubStatements(financialsResp);
+
+    let income: Any[], balance: Any[], cashflow: Any[], metrics: Any[], ratios: Any[], score: Any[], dcf: Any[];
+    let source = "finnhub";
+
+    if (records.length >= 2) {
+      income = records.map((r) => ({
+        revenue: r.revenue, netIncome: r.netIncome,
+        grossProfit: isFiniteNum(r.grossProfit) ? r.grossProfit
+          : (isFiniteNum(r.revenue) && isFiniteNum(r.costOfRevenue) ? r.revenue - r.costOfRevenue : undefined),
+        eps: isFiniteNum(r.netIncome) && isFiniteNum(r.shares) && r.shares! > 0 ? r.netIncome! / r.shares! : undefined,
+      }));
+      balance = records.map((r) => ({ totalAssets: r.assets, goodwill: isFiniteNum(r.goodwill) ? r.goodwill : 0 }));
+      cashflow = records.map((r) => ({ operatingCashFlow: r.ocf }));
+
+      const roic = computeRoicSeries(records);
+      metrics = records.map((_, i) => ({ returnOnInvestedCapital: isFiniteNum(roic[i]) ? roic[i] : undefined } as Any));
+      metrics[0].earningsYield = fh.earningsYield;
+      metrics[0].freeCashFlowYield = fh.fcfYield;
+      metrics[0].evToEBITDA = fh.evEbitda;
+
+      ratios = [{
+        priceToEarningsRatio: fh.peTTM, dividendYield: fh.dividendYield,
+        bookValuePerShare: fh.bookValuePerShare, netIncomePerShare: income[0]?.eps,
+      }];
+
+      // Market cap from Finnhub; shares from statements, else derived (mktcap/price).
+      const marketCap = isFiniteNum(fh.marketCap) ? fh.marketCap
+        : (isFiniteNum(price) && isFiniteNum(records[0]?.shares) ? price! * records[0].shares! : NaN);
+      const shares0 = isFiniteNum(records[0]?.shares) ? records[0].shares
+        : (isFiniteNum(marketCap) && isFiniteNum(price) && price! > 0 ? marketCap! / price! : NaN);
+      const pio = computePiotroski(records);
+      const altman = isFinancial ? null : computeAltman(records[0], isFiniteNum(marketCap) ? marketCap! : NaN);
+      score = [{ piotroskiScore: pio?.score, altmanZScore: altman, piotroskiScoreDetail: pio?.detail ?? null }];
+      const dcfVal = isFinancial ? null : computeDCF(records, isFiniteNum(shares0) ? shares0! : NaN);
+      dcf = [{ dcf: dcfVal, "Stock Price": price }];
+
+      if (isFiniteNum(marketCap)) {
+        await supabase.from("watchlist").update({ market_cap: marketCap }).eq("ticker", ticker);
+      }
+    } else if (fmpKey) {
+      // ---- Fallback: FMP /stable for statements + scores + DCF ----
+      source = "fmp";
+      const fmp = (p: string) => `${FMP}/stable/${p}${p.includes("?") ? "&" : "?"}apikey=${fmpKey}`;
+      const endpoints: [string, string][] = [
+        ["fmp:income", `income-statement?symbol=${ticker}&period=annual&limit=5`],
+        ["fmp:balance", `balance-sheet-statement?symbol=${ticker}&period=annual&limit=5`],
+        ["fmp:cashflow", `cash-flow-statement?symbol=${ticker}&period=annual&limit=5`],
+        ["fmp:metrics", `key-metrics?symbol=${ticker}&period=annual&limit=5`],
+        ["fmp:ratios", `ratios?symbol=${ticker}&period=annual&limit=5`],
+        ["fmp:score", `financial-scores?symbol=${ticker}`],
+        ["fmp:dcf", `discounted-cash-flow?symbol=${ticker}`],
+      ];
+      const fd: Record<string, Any> = {};
+      for (let i = 0; i < endpoints.length; i++) {
+        fd[endpoints[i][0]] = await get(endpoints[i][0], fmp(endpoints[i][1]), DAY, FMP_BUDGET);
+        if (i < endpoints.length - 1) await sleep(300);
+      }
+      income = fd["fmp:income"] ?? []; balance = fd["fmp:balance"] ?? []; cashflow = fd["fmp:cashflow"] ?? [];
+      metrics = fd["fmp:metrics"] ?? []; ratios = fd["fmp:ratios"] ?? [];
+      score = fd["fmp:score"] ?? []; dcf = fd["fmp:dcf"] ?? [];
+    } else {
+      return json({ error: `no data source for ${ticker} (no SEC CIK and no FMP key)` }, 502);
+    }
+
+    const quality = computeQualityScore({ income, balance, cashflow, metrics, ratios, score, insiders: insiders ?? undefined });
+    const value = computeValueScore({ income, metrics, ratios, dcf, profile: [{ price }], price, treasury10y });
 
     const now = new Date().toISOString();
     const errors: string[] = [];
@@ -90,16 +137,13 @@ Deno.serve(async (req) => {
     const v = await supabase.from("value_scores").upsert({ ticker, ...value, computed_at: now }, { onConflict: "ticker" });
     if (v.error) errors.push(`value: ${v.error.message}`);
     await supabase.from("watchlist").update({ last_refreshed: now }).eq("ticker", ticker);
-
-    // Refresh adaptive quadrant boundaries now that this ticker changed.
     await supabase.rpc("recompute_universe_stats");
 
     if (errors.length) return json({ ticker, errors }, 500);
     return json({
-      ticker,
+      ticker, source, years: records.length,
       quality: { composite: quality.composite_score, confidence: quality.confidence },
       value: { composite: value.composite_score, price: value.price },
-      esg_available: !!esg,
     });
   } catch (e) {
     return json({ error: String(e instanceof Error ? e.message : e) }, 500);
