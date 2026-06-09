@@ -1,0 +1,27 @@
+# Netlify configuration for NEWNFL (static site, no build step)
+[build]
+  publish = "."
+
+# Serve the branded page for unknown paths instead of a bare 404.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 404
+
+# Sensible security + caching headers for a static marketing site.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[headers]]
+  for = "/styles.css"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
+
+[[headers]]
+  for = "/script.js"
+  [headers.values]
+    Cache-Control = "public, max-age=86400"
