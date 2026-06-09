@@ -4,7 +4,7 @@
 // and writes the singleton `regime` row. Alpha Vantage is the tightest budget,
 // so calls run SEQUENTIALLY and each response is cached for 24h.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { CORS_HEADERS, fetchWithCache, json } from "../_shared/cache.ts";
+import { CORS_HEADERS, fetchWithCache, getSecret, json, sleep } from "../_shared/cache.ts";
 import { computeRegime } from "../_shared/regime.ts";
 
 const AV = "https://www.alphavantage.co";
@@ -15,13 +15,13 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
 
   try {
-    const avKey = Deno.env.get("ALPHA_VANTAGE_API_KEY");
-    if (!avKey) return json({ error: "ALPHA_VANTAGE_API_KEY not configured" }, 500);
-
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
+
+    const avKey = await getSecret(supabase, "ALPHA_VANTAGE_API_KEY");
+    if (!avKey) return json({ error: "ALPHA_VANTAGE_API_KEY not configured" }, 500);
 
     const endpoints: { key: string; fn: string }[] = [
       { key: "av:gdp", fn: "REAL_GDP&interval=quarterly" },
@@ -34,11 +34,14 @@ Deno.serve(async (req) => {
     ];
 
     const out: Record<string, unknown> = {};
-    for (const e of endpoints) {
+    for (let i = 0; i < endpoints.length; i++) {
+      const e = endpoints[i];
       const url = `${AV}/query?function=${e.fn}&apikey=${avKey}`;
-      // Sequential to respect AV's rate limit; cache-before-fetch avoids re-billing within TTL.
+      // Sequential + paced: AV free tier caps at ~1 request/second. Cache hits
+      // skip the network, so only actual fetches need spacing.
       const r = await fetchWithCache(supabase, null, e.key, url, DAY, AV_BUDGET).catch(() => null);
       out[e.key] = r?.data ?? null;
+      if (i < endpoints.length - 1 && !r?.fromCache) await sleep(1600);
     }
 
     const regime = computeRegime({

@@ -20,22 +20,42 @@ supabase/
 ## Status
 
 - ✅ Schema, RLS, helper functions, and the 15-ticker watchlist are **applied to the remote project**.
-- ✅ Edge functions are **written and ready to deploy** — they need the three provider keys set as secrets first.
+- ✅ Both edge functions are **deployed and verified live** against the real providers.
+- ✅ `refresh-stock/AAPL` produces a full decomposable Quality score (HIGH confidence,
+  all 7 components) and a 6/7 Value score. The 7th Value component (earnings yield
+  vs 10Y bond) fills in once `refresh-regime` has run.
+- ⏳ `refresh-regime` is deployed but Alpha Vantage's 25/day free cap was exhausted
+  during testing — it populates on the next quota reset / scheduled run.
 - ⏳ `pg_cron` daily refresh (Phase 5) is not scheduled yet.
 
-## Secrets (set these before deploying functions)
+## Secrets
 
-API keys live ONLY in edge-function env — never in the client bundle
-(BUILD_SPEC.md principle #1). Set them with the Supabase CLI:
+API keys must never reach the client bundle (BUILD_SPEC.md principle #1). The
+functions resolve each key via `getSecret()`, which checks **two** stores in order:
 
-```bash
-supabase secrets set \
-  FMP_API_KEY=xxxxx \
-  FINNHUB_API_KEY=xxxxx \
-  ALPHA_VANTAGE_API_KEY=xxxxx
-```
+1. An Edge Function **env var** of that name (Supabase-recommended), set with:
+   ```bash
+   supabase secrets set FMP_API_KEY=xxxxx FINNHUB_API_KEY=xxxxx ALPHA_VANTAGE_API_KEY=xxxxx
+   ```
+2. A **Supabase Vault** secret of that name (where the keys currently live), read
+   server-side via the `get_vault_secret` RPC (service-role only).
 
 `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected automatically.
+
+## Free-tier provider realities (discovered during integration)
+
+The BUILD_SPEC was written against provider APIs that have since changed:
+
+- **FMP** retired the `/api/v3/` endpoints (Aug 31 2025). The functions use the
+  new **`/stable/`** API (`?symbol=TICKER`). Field names moved too: ROIC is
+  `returnOnInvestedCapital`, EV/EBITDA is `evToEBITDA`, and P/E, dividend yield,
+  book value and net-income-per-share now come from `/stable/ratios`.
+- **FMP free tier caps history at `limit<=5`** (5 annual periods, not 10; `limit=10`
+  returns 402 Premium). Trends/CV are computed over 5 years.
+- FMP free also throttles parallel bursts, so its 8 endpoints are fetched
+  **sequentially with light pacing**.
+- **Alpha Vantage free** is 25 requests/day AND ~1 request/second. `refresh-regime`
+  paces its 7 calls ~1.6s apart; the cache layer never stores throttle notices.
 
 ## Deploy the functions
 

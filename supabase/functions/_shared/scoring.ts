@@ -65,8 +65,8 @@ export function computeQualityScore(raw: QualityRaw) {
   }
   const cAltman: Component = { weight: W, score: zScore, raw: { altmanZ: z, zone } };
 
-  // 3. ROIC consistency over 10yr
-  const roic = series(raw.metrics, "roic");
+  // 3. ROIC consistency over 10yr (FMP stable key-metrics: returnOnInvestedCapital)
+  const roic = series(raw.metrics, "returnOnInvestedCapital");
   let roicScore = NaN, roicCur = NaN, roicAvg = NaN, roicTrend = NaN, pctAboveWacc = NaN;
   if (roic.length) {
     roicCur = roic[0];
@@ -148,8 +148,9 @@ export function computeQualityScore(raw: QualityRaw) {
   };
 
   // Confidence: management is inherently soft; downgrade when key series are thin.
+  // FMP's free tier caps history at 5 annual periods, so "high" needs >=5 years.
   const missing = Object.values(components).filter((c) => !isFiniteNum(c.score)).length;
-  const confidence = missing >= 2 ? "low" : roic.length >= 7 && revenue.length >= 7 ? "high" : "medium";
+  const confidence = missing >= 2 ? "low" : roic.length >= 5 && revenue.length >= 5 ? "high" : "medium";
 
   return {
     composite_score: composite(components),
@@ -184,7 +185,8 @@ export interface ValueRaw {
 
 export function computeValueScore(raw: ValueRaw) {
   const W = 1 / 7;
-  const m: Row = raw.metrics?.[0] ?? {};
+  const m: Row = raw.metrics?.[0] ?? {};  // FMP stable key-metrics
+  const r: Row = raw.ratios?.[0] ?? {};   // FMP stable ratios
   const profile: Row = Array.isArray(raw.profile) ? (raw.profile[0] ?? {}) : (raw.profile ?? {});
   const dcfObj: Row = Array.isArray(raw.dcf) ? (raw.dcf[0] ?? {}) : (raw.dcf ?? {});
   const price = num(raw.price, num(profile.price, num(dcfObj["Stock Price"])));
@@ -210,8 +212,8 @@ export function computeValueScore(raw: ValueRaw) {
     raw: { fcf_yield: fcfYield, percentile: null /* set during recompute */ },
   };
 
-  // 3. P/E vs sector median
-  const pe = num(m.peRatio);
+  // 3. P/E vs sector median (FMP stable ratios: priceToEarningsRatio)
+  const pe = num(r.priceToEarningsRatio);
   let peScore = 50;
   if (isFiniteNum(pe) && isFiniteNum(raw.sectorMedianPE) && raw.sectorMedianPE! > 0) {
     const premium = (pe - raw.sectorMedianPE!) / raw.sectorMedianPE!;
@@ -223,8 +225,8 @@ export function computeValueScore(raw: ValueRaw) {
   };
 
   // 4. Graham number — caps contribution for capital-light names (BVPS < $5)
-  const eps = num(raw.income?.[0]?.eps, num(m.netIncomePerShare));
-  const bvps = num(m.bookValuePerShare);
+  const eps = num(raw.income?.[0]?.eps, num(r.netIncomePerShare));
+  const bvps = num(r.bookValuePerShare);
   let graham = num(m.grahamNumber);
   if (!isFiniteNum(graham) && isFiniteNum(eps) && isFiniteNum(bvps) && eps > 0 && bvps > 0) {
     graham = Math.sqrt(22.5 * eps * bvps);
@@ -238,8 +240,8 @@ export function computeValueScore(raw: ValueRaw) {
     raw: { graham_number: nz(graham), margin_of_safety: nz(mos), bvps: nz(bvps), reliable: grahamReliable },
   };
 
-  // 5. EV/EBITDA vs peers (peer percentile deferred; absolute fallback, lower is better)
-  const evEbitda = num(m.enterpriseValueOverEBITDA);
+  // 5. EV/EBITDA vs peers (FMP stable key-metrics: evToEBITDA; peer pctl deferred)
+  const evEbitda = num(m.evToEBITDA);
   const cEv: Component = {
     weight: W,
     score: isFiniteNum(evEbitda) && evEbitda > 0 ? linMap(evEbitda, 5, 25, 90, 20) : NaN,
@@ -255,9 +257,9 @@ export function computeValueScore(raw: ValueRaw) {
     raw: { dcf_intrinsic: nz(dcfVal), margin_of_safety: nz(dcfMos) },
   };
 
-  // 7. Dividend yield vs own history
-  const divYield = num(m.dividendYield);
-  const divHist = series(raw.metrics, "dividendYield").slice(0, 5);
+  // 7. Dividend yield vs own history (FMP stable ratios: dividendYield)
+  const divYield = num(r.dividendYield);
+  const divHist = series(raw.ratios, "dividendYield").slice(0, 5);
   const divAvg = mean(divHist);
   const divRatio = isFiniteNum(divYield) && isFiniteNum(divAvg) && divAvg > 0 ? divYield / divAvg : NaN;
   const cDiv: Component = {
@@ -281,7 +283,7 @@ export function computeValueScore(raw: ValueRaw) {
     ev_ebitda: nz(evEbitda), ev_ebitda_vs_peers: null,
     dcf_intrinsic: nz(dcfVal), dividend_yield: nz(divYield), div_yield_vs_history: nz(divRatio),
     component_detail: components,
-    history_10yr: { dividend_yield: oldestFirst(series(raw.metrics, "dividendYield")) },
+    history_10yr: { dividend_yield: oldestFirst(series(raw.ratios, "dividendYield")) },
   };
 }
 

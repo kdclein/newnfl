@@ -56,6 +56,14 @@ export async function fetchWithCache(
   }
   const data = await res.json();
 
+  // Providers return HTTP 200 with an error/throttle note (Alpha Vantage
+  // "Information"/"Note", FMP "Error Message"). Never cache those — caching a
+  // rate-limit notice would poison this endpoint for the whole TTL window.
+  if (looksLikeProviderError(data)) {
+    if (cached) return { data: cached.data, stale: true, fromCache: true };
+    throw new Error(`${budget.provider} returned a throttle/error note for ${endpoint}`);
+  }
+
   await supabase.from("api_cache").upsert(
     { ticker, endpoint, data, fetched_at: new Date().toISOString(), ttl_seconds: ttlSeconds },
     { onConflict: "ticker,endpoint" },
@@ -63,6 +71,30 @@ export async function fetchWithCache(
 
   return { data, stale: false, fromCache: false };
 }
+
+/**
+ * Resolve an API key. Prefers an Edge Function env var (the Supabase-recommended
+ * store) and falls back to a Vault secret of the same name via the service-role
+ * `get_vault_secret` RPC. This lets the keys live in either place.
+ */
+export async function getSecret(supabase: SupabaseClient, name: string): Promise<string | null> {
+  const env = Deno.env.get(name);
+  if (env) return env;
+  const { data, error } = await supabase.rpc("get_vault_secret", { p_name: name });
+  if (error) return null;
+  return (data as string | null) ?? null;
+}
+
+/** Detects the HTTP-200 error/throttle payloads that FMP and Alpha Vantage return. */
+export function looksLikeProviderError(data: unknown): boolean {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+  const o = data as Record<string, unknown>;
+  return "Information" in o || "Note" in o || "Error Message" in o ||
+    ("error" in o && Object.keys(o).length <= 2);
+}
+
+/** Sleep helper for pacing rate-limited sequential calls. */
+export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",

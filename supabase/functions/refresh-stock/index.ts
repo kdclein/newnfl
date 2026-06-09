@@ -3,7 +3,7 @@
 // TTL cache, computes Quality + Value scores, and writes them to Supabase.
 // API keys live ONLY in this function's env — never shipped to the client.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { CORS_HEADERS, fetchWithCache, json } from "../_shared/cache.ts";
+import { CORS_HEADERS, fetchWithCache, getSecret, json, sleep } from "../_shared/cache.ts";
 import { computeQualityScore, computeValueScore } from "../_shared/scoring.ts";
 
 const FMP = "https://financialmodelingprep.com";
@@ -20,29 +20,46 @@ Deno.serve(async (req) => {
       .toUpperCase();
     if (!ticker || ticker === "REFRESH-STOCK") return json({ error: "ticker required" }, 400);
 
-    const fmpKey = Deno.env.get("FMP_API_KEY");
-    const fhKey = Deno.env.get("FINNHUB_API_KEY");
-    if (!fmpKey) return json({ error: "FMP_API_KEY not configured" }, 500);
-
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    const fmp = (path: string) => `${FMP}${path}${path.includes("?") ? "&" : "?"}apikey=${fmpKey}`;
+    const fmpKey = await getSecret(supabase, "FMP_API_KEY");
+    const fhKey = await getSecret(supabase, "FINNHUB_API_KEY");
+    if (!fmpKey) return json({ error: "FMP_API_KEY not configured" }, 500);
+
+    // FMP's /stable API (the /api/v3 endpoints were retired Aug 31, 2025).
+    // Stable uses ?symbol=TICKER rather than a path segment.
+    const fmp = (path: string) => `${FMP}/stable/${path}${path.includes("?") ? "&" : "?"}apikey=${fmpKey}`;
     const get = (endpoint: string, url: string, ttl: number, budget = FMP_BUDGET) =>
       fetchWithCache(supabase, ticker, endpoint, url, ttl, budget).then((r) => r.data).catch(() => null);
 
-    // Fundamentals (FMP) — fetched in parallel, each cached independently.
-    const [income, balance, cashflow, metrics, ratios, score, dcf, profile, esg, insiders] = await Promise.all([
-      get("fmp:income", fmp(`/api/v3/income-statement/${ticker}?period=annual&limit=10`), DAY),
-      get("fmp:balance", fmp(`/api/v3/balance-sheet-statement/${ticker}?period=annual&limit=10`), DAY),
-      get("fmp:cashflow", fmp(`/api/v3/cash-flow-statement/${ticker}?period=annual&limit=10`), DAY),
-      get("fmp:metrics", fmp(`/api/v3/key-metrics/${ticker}?period=annual&limit=10`), DAY),
-      get("fmp:ratios", fmp(`/api/v3/financial-ratios/${ticker}?period=annual&limit=10`), DAY),
-      get("fmp:score", fmp(`/api/v3/score?symbol=${ticker}`), DAY),
-      get("fmp:dcf", fmp(`/api/v3/discounted-cash-flow/${ticker}`), DAY),
-      get("fmp:profile", fmp(`/api/v3/profile/${ticker}`), DAY),
+    // FMP free tier throttles parallel bursts, so fetch its endpoints
+    // SEQUENTIALLY with light pacing. Each is cached independently (24h).
+    const fmpEndpoints: [string, string][] = [
+      ["fmp:income", `income-statement?symbol=${ticker}&period=annual&limit=5`],
+      ["fmp:balance", `balance-sheet-statement?symbol=${ticker}&period=annual&limit=5`],
+      ["fmp:cashflow", `cash-flow-statement?symbol=${ticker}&period=annual&limit=5`],
+      ["fmp:metrics", `key-metrics?symbol=${ticker}&period=annual&limit=5`],
+      ["fmp:ratios", `ratios?symbol=${ticker}&period=annual&limit=5`],
+      ["fmp:score", `financial-scores?symbol=${ticker}`],
+      ["fmp:dcf", `discounted-cash-flow?symbol=${ticker}`],
+      ["fmp:profile", `profile?symbol=${ticker}`],
+    ];
+    const fmpData: Record<string, unknown> = {};
+    for (let i = 0; i < fmpEndpoints.length; i++) {
+      const [ep, path] = fmpEndpoints[i];
+      fmpData[ep] = await get(ep, fmp(path), DAY);
+      if (i < fmpEndpoints.length - 1) await sleep(300);
+    }
+    const income = fmpData["fmp:income"], balance = fmpData["fmp:balance"],
+      cashflow = fmpData["fmp:cashflow"], metrics = fmpData["fmp:metrics"],
+      ratios = fmpData["fmp:ratios"], score = fmpData["fmp:score"],
+      dcf = fmpData["fmp:dcf"], profile = fmpData["fmp:profile"];
+
+    // Finnhub is a separate provider/budget — fine to run in parallel.
+    const [esg, insiders] = await Promise.all([
       fhKey ? get("fh:esg", `${FINNHUB}/api/v1/stock/esg?symbol=${ticker}&token=${fhKey}`, WEEK, FH_BUDGET) : null,
       fhKey ? get("fh:insiders", `${FINNHUB}/api/v1/stock/insider-transactions?symbol=${ticker}&token=${fhKey}`, DAY, FH_BUDGET) : null,
     ]);
