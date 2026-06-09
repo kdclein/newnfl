@@ -1,0 +1,19 @@
+# Netlify config for the NEWNFL app (app.newnfl.com). The marketing landing
+# page lives at the repo root and deploys as a separate Netlify site; this site
+# uses base directory "app".
+[build]
+  base = "app"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# SPA fallback
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+# VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY can be set in the Netlify
+# dashboard; the app also ships safe public defaults (RLS-protected).
