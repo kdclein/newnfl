@@ -1,0 +1,11 @@
+# Supabase CLI config for the NEWNFL project.
+project_id = "vhnbugglrpxwuzjfuzph"
+
+# refresh-* are invoked with the anon key by the frontend "Refresh" button and
+# by pg_cron; the per-provider daily quota guards the API budget. Flip these to
+# true if you'd rather require a signed-in user session.
+[functions.refresh-stock]
+verify_jwt = false
+
+[functions.refresh-regime]
+verify_jwt = false
