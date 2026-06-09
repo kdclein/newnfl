@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NEWNFL — Numbers, Fundamentals &amp; Logic</title>
+  <meta name="description" content="NEWNFL — Numbers, Fundamentals &amp; Logic. A new way to read the numbers. Every score is decomposable: raw data, Quality × Value, and regime-aware logic that produces BUY / WATCH / AVOID / SELL." />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="NEWNFL — Numbers, Fundamentals &amp; Logic" />
+  <meta property="og:description" content="A new way to read the numbers. Every score is decomposable." />
+  <meta property="og:site_name" content="NEWNFL" />
+  <meta name="theme-color" content="#0a0e14" />
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- ====== NAV ====== -->
+  <header class="nav">
+    <a class="brand" href="#top" aria-label="NEWNFL home">
+      <span class="brand-mark"><span class="brand-new">NEW</span>NFL</span>
+    </a>
+    <nav class="nav-links">
+      <a href="#pillars">The Method</a>
+      <a href="#signals">Signals</a>
+      <a href="#decompose">Show the Work</a>
+      <a class="nav-cta" href="#access">Get Access</a>
+    </nav>
+  </header>
+
+  <!-- ====== HERO ====== -->
+  <main id="top">
+    <section class="hero">
+      <div class="hero-grid" aria-hidden="true"></div>
+      <div class="hero-inner">
+        <p class="eyebrow">Numbers · Fundamentals · Logic</p>
+        <h1 class="wordmark">
+          <span class="new">NEW</span><span class="nfl">NFL</span>
+        </h1>
+        <p class="tagline">A new way to read the numbers.</p>
+        <p class="lede">
+          Every score is <strong>decomposable</strong>. We never hand you a verdict
+          without the math behind it — the raw <em>Numbers</em>, the
+          <em>Fundamentals</em> of Quality&nbsp;×&nbsp;Value, and the regime-aware
+          <em>Logic</em> that turns it into a call.
+        </p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="#access">Get early access</a>
+          <a class="btn btn-ghost" href="#decompose">See a score broken down</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====== PILLARS ====== -->
+    <section id="pillars" class="section">
+      <div class="section-head">
+        <h2>Three letters. Three things the platform actually does.</h2>
+        <p class="section-sub">NEWNFL isn't a slogan stretched over a logo. Each pillar is a real layer of the pipeline.</p>
+      </div>
+      <div class="pillars">
+        <article class="pillar">
+          <span class="pillar-tag">N</span>
+          <h3>Numbers</h3>
+          <p>The raw data — box scores, efficiency, pace, injuries, lines and market movement. Sourced, timestamped, and auditable. Nothing is invented.</p>
+        </article>
+        <article class="pillar">
+          <span class="pillar-tag">F</span>
+          <h3>Fundamentals</h3>
+          <p>Quality&nbsp;×&nbsp;Value. We separate <em>how good</em> a team is from <em>how it's priced</em> — so a great team at a bad number and a mediocre team at a great number are never confused.</p>
+        </article>
+        <article class="pillar">
+          <span class="pillar-tag">L</span>
+          <h3>Logic</h3>
+          <p>Regime-aware reasoning. The same fundamentals read differently in different contexts — and the rules that map them to a verdict are explicit, not a black box.</p>
+        </article>
+      </div>
+    </section>
+
+    <!-- ====== SIGNALS ====== -->
+    <section id="signals" class="section section-alt">
+      <div class="section-head">
+        <h2>Four verdicts. Zero ambiguity.</h2>
+        <p class="section-sub">Logic resolves to one of four calls. You always know exactly where a position stands.</p>
+      </div>
+      <div class="signals">
+        <div class="signal signal-buy">
+          <span class="signal-label">BUY</span>
+          <p>Quality and Value align in your favor. The edge is real and the price is right.</p>
+        </div>
+        <div class="signal signal-watch">
+          <span class="signal-label">WATCH</span>
+          <p>The thesis is forming. Not yet actionable — but worth tracking as the regime shifts.</p>
+        </div>
+        <div class="signal signal-avoid">
+          <span class="signal-label">AVOID</span>
+          <p>The math doesn't support entry. The number is wrong for the quality on offer.</p>
+        </div>
+        <div class="signal signal-sell">
+          <span class="signal-label">SELL</span>
+          <p>The edge has flipped or evaporated. Time to step away or fade.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====== SHOW THE WORK ====== -->
+    <section id="decompose" class="section">
+      <div class="section-head">
+        <h2>Principle #1: show the work.</h2>
+        <p class="section-sub">Every score must be decomposable. Here's what that looks like in practice.</p>
+      </div>
+
+      <div class="decompose-card">
+        <div class="decompose-head">
+          <div class="matchup">
+            <span class="team">Team A</span>
+            <span class="vs">vs</span>
+            <span class="team">Team B</span>
+          </div>
+          <span class="verdict verdict-buy" id="verdictChip">BUY</span>
+        </div>
+
+        <div class="score-row">
+          <span class="score-label">NEWNFL Score</span>
+          <span class="score-value" id="scoreValue">+7.4</span>
+        </div>
+
+        <ul class="breakdown">
+          <li>
+            <span class="bd-name"><strong>Numbers</strong> — raw differential</span>
+            <span class="bd-bar"><span class="bd-fill" style="--w:78%"></span></span>
+            <span class="bd-num">+3.1</span>
+          </li>
+          <li>
+            <span class="bd-name"><strong>Fundamentals</strong> — Quality × Value</span>
+            <span class="bd-bar"><span class="bd-fill" style="--w:64%"></span></span>
+            <span class="bd-num">+2.6</span>
+          </li>
+          <li>
+            <span class="bd-name"><strong>Logic</strong> — regime adjustment</span>
+            <span class="bd-bar"><span class="bd-fill" style="--w:42%"></span></span>
+            <span class="bd-num">+1.7</span>
+          </li>
+        </ul>
+
+        <p class="decompose-foot">
+          <code>+3.1 + 2.6 + 1.7 = +7.4</code> — the components always reconstruct the score.
+          No hidden weights, no unexplained verdicts.
+        </p>
+      </div>
+    </section>
+
+    <!-- ====== ACCESS ====== -->
+    <section id="access" class="section section-cta">
+      <div class="cta-inner">
+        <h2>Read the numbers a new way.</h2>
+        <p>NEWNFL is in private build. Leave an email and we'll bring you in as access opens.</p>
+        <form class="access-form" id="accessForm" novalidate>
+          <input
+            type="email"
+            id="emailInput"
+            name="email"
+            placeholder="you@email.com"
+            autocomplete="email"
+            aria-label="Email address"
+            required
+          />
+          <button type="submit" class="btn btn-primary">Request access</button>
+        </form>
+        <p class="form-note" id="formNote" role="status" aria-live="polite"></p>
+      </div>
+    </section>
+  </main>
+
+  <!-- ====== FOOTER ====== -->
+  <footer class="footer">
+    <div class="footer-brand">
+      <span class="brand-mark small"><span class="brand-new">NEW</span>NFL</span>
+      <span class="footer-expand">Numbers, Fundamentals &amp; Logic</span>
+    </div>
+    <p class="footer-fine">
+      &copy; <span id="year"></span> NEWNFL. For informational and analytical purposes only — not financial or betting advice.
+    </p>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
