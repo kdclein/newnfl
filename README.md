@@ -44,11 +44,29 @@ These are static files, so any host works. Two common GoDaddy paths:
    - In GoDaddy → **Domains → DNS**, add the records your host gives you
      (typically a `CNAME` for `www` and an `A`/`ALIAS` for the apex).
 
+## Waitlist (Supabase)
+
+The "Request access" form writes to a Supabase Postgres table.
+
+- **Project:** `newnfl` (`vhnbugglrpxwuzjfuzph`), region `us-east-2`.
+- **Table:** `public.waitlist` (`email`, `source`, `user_agent`, `created_at`).
+- **Security:** Row Level Security is **on**. The public (publishable) key can
+  only **insert** rows that look like genuine landing-page signups; it **cannot
+  read, update, or delete** the list. View signups from the Supabase dashboard
+  (Table editor) or with the service-role key.
+- **Config:** `SUPABASE_URL` and `SUPABASE_KEY` live at the top of `script.js`.
+  The key is the **publishable** key and is safe to ship in the browser — it's
+  protected by RLS. Never put the `service_role` key in client code.
+- **Fallback:** if the network call fails, the email is still saved to
+  `localStorage` so intent isn't lost, and the user sees a success message.
+
+Export current signups (dashboard → SQL editor, or service role):
+
+```sql
+select email, source, created_at from public.waitlist order by created_at desc;
+```
+
 ## Notes
 
-- The email form is **front-end only** — it validates and stores entries in
-  `localStorage`. Wire the submit handler in `script.js` to a real backend
-  (Supabase, a form service, or an API endpoint) when you're ready to
-  collect a live waitlist.
 - Disclaimer in the footer: informational/analytical use only — not financial
   or betting advice.
