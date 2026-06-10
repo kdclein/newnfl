@@ -1,14 +1,21 @@
-# Netlify configuration for NEWNFL (static site, no build step)
+# Netlify configuration for NEWNFL.
+# newnfl.com serves the Quality x Value quadrant app (Vite/React) built from app/.
+# The build runs from the repo root (no base switch) so this root config stays
+# the single source of truth; app/dist is the publish directory.
 [build]
-  publish = "."
+  command = "npm install --prefix app && npm run build --prefix app"
+  publish = "app/dist"
 
-# Serve the branded page for unknown paths instead of a bare 404.
+[build.environment]
+  NODE_VERSION = "20"
+
+# SPA fallback — serve the app shell for client-side routes.
 [[redirects]]
   from = "/*"
   to = "/index.html"
-  status = 404
+  status = 200
 
-# Sensible security + caching headers for a static marketing site.
+# Sensible security headers.
 [[headers]]
   for = "/*"
   [headers.values]
@@ -16,12 +23,8 @@
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
 
+# Hashed Vite assets are immutable — cache them aggressively.
 [[headers]]
-  for = "/styles.css"
+  for = "/assets/*"
   [headers.values]
-    Cache-Control = "public, max-age=86400"
-
-[[headers]]
-  for = "/script.js"
-  [headers.values]
-    Cache-Control = "public, max-age=86400"
+    Cache-Control = "public, max-age=31536000, immutable"
