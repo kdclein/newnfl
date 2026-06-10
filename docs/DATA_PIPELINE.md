@@ -24,7 +24,8 @@ Everything is driven by **three pg_cron jobs** plus derived SQL passes.
 |---|---|---|---|
 | `newnfl-refresh-stocks` | every minute | Refreshes the **10 stalest** tickers' fundamentals + scores | ~2–5 s per stock |
 | `newnfl-cross-sectional` | every minute | Recomputes all **relative-value** metrics across the universe | < 1 s for all 503 |
-| `newnfl-refresh-regime` | daily, 09:35 UTC | Pulls **macro** series from FRED, scores the regime, caches the 10Y Treasury | ~3–5 s |
+| `newnfl-refresh-macro` | daily, 09:35 UTC | Builds the **22+ indicator macro dashboard** (~23 FRED series + multpl.com CAPE/PE + self-computed universe aggregates), the regime row (cycle phase, Estrella–Mishkin/Sahm/credit recession probability), and the 10Y Treasury cache | ~10–20 s |
+| `newnfl-price-snapshot` | weekdays, 21:15 UTC | Snapshots each stock's close into `price_history` so %-above-200/100-DMA breadth accumulates (no free backfill source exists) | < 1 s |
 
 `recompute_universe_stats()` (quadrant median boundaries) runs **after every stock
 refresh**, so the BUY/WATCH/AVOID/SELL lines re-center continuously.

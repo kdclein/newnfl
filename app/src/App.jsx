@@ -4,7 +4,7 @@ import { classify, unified, fmt, INDEXES, CYCLE_LABEL, SIGNALS } from "./lib/sco
 import Ring from "./components/Ring.jsx";
 import Quadrant from "./components/Quadrant.jsx";
 import StockDetail from "./components/StockDetail.jsx";
-import RegimeDetail from "./components/RegimeDetail.jsx";
+import MacroDashboard from "./components/MacroDashboard.jsx";
 
 function median(xs) {
   const v = xs.filter((x) => x != null).sort((a, b) => a - b);
@@ -190,6 +190,10 @@ export default function App() {
           className="card px-2.5 py-1.5 text-xs bg-transparent text-white/80 outline-none">
           {sectors.map((s) => <option key={s} value={s} className="bg-ink">{s === "All" ? "All sectors" : s}</option>)}
         </select>
+        <button onClick={() => setShowRegime(true)}
+          className="card px-2.5 py-1.5 text-xs font-medium text-white/70 hover:text-white hover:bg-white/[0.06] transition">
+          🌐 Macro
+        </button>
         <span className="text-white/35 text-xs font-mono ml-auto">
           {loading ? "loading…" : `${scoredCount}/${filtered.length} scored`}
         </span>
@@ -336,7 +340,7 @@ export default function App() {
       </footer>
 
       {detail && <StockDetail data={detail} loading={detailLoading} onClose={() => closeStock(true)} />}
-      {showRegime && <RegimeDetail regime={regime} onClose={() => setShowRegime(false)} />}
+      {showRegime && <MacroDashboard regime={regime} onClose={() => setShowRegime(false)} />}
     </div>
   );
 }
