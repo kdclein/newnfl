@@ -25,6 +25,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [idx, setIdx] = useState("sp500");
   const [sector, setSector] = useState("All");
+  const [sigFilter, setSigFilter] = useState("ALL");
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -75,8 +76,10 @@ export default function App() {
   const vMed = stats?.value_median != null ? Number(stats.value_median) : median(rows.map((r) => r.v));
 
   const filtered = useMemo(() => rows.filter((r) =>
-    (idx === "all" || r.indexes.has(idx)) && (sector === "All" || r.sector === sector),
-  ), [rows, idx, sector]);
+    (idx === "all" || r.indexes.has(idx)) &&
+    (sector === "All" || r.sector === sector) &&
+    (sigFilter === "ALL" || classify(r.q, r.v, qMed, vMed).label === sigFilter),
+  ), [rows, idx, sector, sigFilter, qMed, vMed]);
 
   const ranked = useMemo(() =>
     [...filtered].sort((a, b) => (unified(b.q, b.v) ?? -1) - (unified(a.q, a.v) ?? -1)),
@@ -176,7 +179,7 @@ export default function App() {
       </header>
 
       {/* Toggles */}
-      <div className="flex flex-wrap items-center gap-2 mb-4">
+      <div className="flex flex-wrap items-center gap-2 mb-2">
         <div className="flex gap-1 card p-1">
           {INDEXES.map((i) => (
             <button key={i.id} onClick={() => setIdx(i.id)}
@@ -197,6 +200,23 @@ export default function App() {
         <span className="text-white/35 text-xs font-mono ml-auto">
           {loading ? "loading…" : `${scoredCount}/${filtered.length} scored`}
         </span>
+      </div>
+
+      {/* Signal filter */}
+      <div className="flex gap-1 card p-1 mb-4 w-fit">
+        {["ALL", ...Object.keys(SIGNALS).filter((k) => k !== "NA")].map((k) => {
+          const active = sigFilter === k;
+          const c = k === "ALL" ? "#e8e8f0" : SIGNALS[k].color;
+          return (
+            <button key={k} onClick={() => setSigFilter(k)} title={k === "ALL" ? "All signals" : SIGNALS[k].quadrant}
+              className="px-2.5 py-1 rounded text-xs font-bold tracking-wide transition"
+              style={active
+                ? { color: c, background: c + "22" }
+                : { color: "rgba(255,255,255,0.4)" }}>
+              {k === "ALL" ? "All" : k}
+            </button>
+          );
+        })}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">

@@ -1,13 +1,20 @@
 // Edge function: /refresh-universe
 // Seeds the ticker universe + index membership that powers the front-page
-// toggles. The frequently-rebalanced S&P 500 is fetched live (with GICS sector
-// + SEC CIK) from a public dataset; the small, rarely-changing DJIA / Nasdaq-100
-// lists are kept as version-controlled constants here.
+// toggles. The S&P 500 is fetched live (with GICS sector + SEC CIK) from a public
+// dataset; the DJIA is a version-controlled constant; the Nasdaq-100 is pulled
+// live from Nasdaq's own list-type API. New tickers not already in the watchlist
+// are inserted (without clobbering existing rows' sectors) so the scoring cron
+// picks them up.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { CORS_HEADERS, json } from "../_shared/cache.ts";
 
 const SP500_CSV =
   "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv";
+const NASDAQ100 = "https://api.nasdaq.com/api/quote/list-type/nasdaq100";
+const UA = "Mozilla/5.0 (compatible; NEWNFL/1.0)";
+
+// deno-lint-ignore no-explicit-any
+type Any = any;
 
 // Dow Jones Industrial Average — 30 components (all also in the S&P 500).
 const DJIA = [
@@ -33,6 +40,7 @@ function parseCsvLine(line: string): string[] {
 }
 
 const pad10 = (cik: string) => cik.replace(/\D/g, "").padStart(10, "0");
+const cleanSym = (s: string) => s.trim().toUpperCase().replace(/\s+/g, "");
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS_HEADERS });
@@ -55,7 +63,7 @@ Deno.serve(async (req) => {
     const sp500Members: { ticker: string; index_name: string }[] = [];
     for (let i = 1; i < lines.length; i++) {
       const f = parseCsvLine(lines[i]);
-      const ticker = (f[iSym] ?? "").trim().toUpperCase();
+      const ticker = cleanSym(f[iSym] ?? "");
       if (!ticker) continue;
       watchRows.push({
         ticker,
@@ -66,22 +74,64 @@ Deno.serve(async (req) => {
       sp500Members.push({ ticker, index_name: "sp500" });
     }
 
-    // Upsert watchlist (leaves scores / last_refreshed untouched) + membership.
     const w = await supabase.from("watchlist").upsert(watchRows, { onConflict: "ticker" });
     if (w.error) return json({ error: `watchlist upsert: ${w.error.message}` }, 500);
     const m = await supabase.from("index_membership")
       .upsert(sp500Members, { onConflict: "ticker,index_name", ignoreDuplicates: true });
     if (m.error) return json({ error: `sp500 membership: ${m.error.message}` }, 500);
 
-    // ---- DJIA (static; all are S&P 500 members so already in watchlist) ----
+    // ---- DJIA (static; all are S&P 500 members) ----
     const djiaMembers = DJIA.map((ticker) => ({ ticker, index_name: "djia" }));
     const d = await supabase.from("index_membership")
       .upsert(djiaMembers, { onConflict: "ticker,index_name", ignoreDuplicates: true });
     if (d.error) return json({ error: `djia membership: ${d.error.message}` }, 500);
 
+    // ---- Nasdaq-100 (live, from Nasdaq's list-type API) ----
+    let nasdaq100Count = 0, nasdaqNew = 0;
+    try {
+      const nr = await fetch(NASDAQ100, { headers: { "User-Agent": UA, "Accept": "application/json" } });
+      if (nr.ok) {
+        const body = await nr.json() as Any;
+        const rows = (body?.data?.data?.rows ?? []) as Any[];
+        const { data: existing } = await supabase.from("watchlist").select("ticker");
+        const have = new Set((existing ?? []).map((r: Any) => r.ticker));
+
+        const members: { ticker: string; index_name: string }[] = [];
+        const newRows: Record<string, unknown>[] = [];
+        for (const row of rows) {
+          const ticker = cleanSym(String(row?.symbol ?? ""));
+          if (!ticker) continue;
+          members.push({ ticker, index_name: "nasdaq100" });
+          if (!have.has(ticker)) {
+            // Nasdaq's feed has no GICS sector, so leave it null for the few
+            // Nasdaq-100 names not already in the S&P 500; scoring works by symbol.
+            const name = row?.companyName
+              ? String(row.companyName).replace(/ Common Stock$/i, "").replace(/ Class [A-Z].*$/i, "").trim()
+              : null;
+            newRows.push({ ticker, name: name || null, sector: null });
+            have.add(ticker);
+          }
+        }
+        nasdaq100Count = members.length;
+        nasdaqNew = newRows.length;
+        if (newRows.length) {
+          const nw = await supabase.from("watchlist").upsert(newRows, { onConflict: "ticker", ignoreDuplicates: true });
+          if (nw.error) return json({ error: `nasdaq100 watchlist: ${nw.error.message}` }, 500);
+        }
+        const nm = await supabase.from("index_membership")
+          .upsert(members, { onConflict: "ticker,index_name", ignoreDuplicates: true });
+        if (nm.error) return json({ error: `nasdaq100 membership: ${nm.error.message}` }, 500);
+      }
+    } catch (e) {
+      // Non-fatal: keep S&P/DJIA seeding even if Nasdaq's API hiccups.
+      return json({ sp500: sp500Members.length, djia: DJIA.length, nasdaq100_error: String(e) }, 200);
+    }
+
     return json({
       sp500: sp500Members.length,
       djia: DJIA.length,
+      nasdaq100: nasdaq100Count,
+      nasdaq100_new_tickers: nasdaqNew,
       watchlist_upserted: watchRows.length,
     });
   } catch (e) {
