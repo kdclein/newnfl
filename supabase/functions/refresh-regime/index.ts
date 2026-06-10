@@ -11,6 +11,10 @@ const FRED = "https://api.stlouisfed.org/fred/series/observations";
 // FRED's documented cap is generous (~120 req/min); 7 cached daily calls is nothing.
 const FRED_BUDGET = { provider: "fred", dailyLimit: 1000 };
 const DAY = 86400;
+// Non-null sentinel for universe-wide (non-per-ticker) cache rows. A NULL ticker
+// would defeat the api_cache (ticker, endpoint) unique index — NULL <> NULL — so
+// upserts never dedupe and reads via .maybeSingle() break on the duplicates.
+const MACRO = "_macro";
 
 // FRED series id -> the RegimeRaw field the regime engine expects. `limit` is
 // sized to the largest look-back each indicator needs (YoY windows + trend).
@@ -49,7 +53,7 @@ Deno.serve(async (req) => {
     const raw: Record<string, AvSeries> = {};
     for (const s of SERIES) {
       const url = `${FRED}?series_id=${s.id}&api_key=${key}&file_type=json&sort_order=desc&limit=${s.limit}`;
-      const r = await fetchWithCache(supabase, null, `fred:${s.id}`, url, DAY, FRED_BUDGET).catch(() => null);
+      const r = await fetchWithCache(supabase, MACRO, `fred:${s.id}`, url, DAY, FRED_BUDGET).catch(() => null);
       raw[s.field] = toSeries(r?.data);
     }
 
@@ -69,7 +73,7 @@ Deno.serve(async (req) => {
     // legacy `av:treasury_10y` key, expecting a percent string at data[0].value.
     // DGS10 is already quoted in percent, so refresh-stock's parse is unchanged.
     await supabase.from("api_cache").upsert(
-      { ticker: null, endpoint: "av:treasury_10y", data: raw.treasury_10y, fetched_at: new Date().toISOString(), ttl_seconds: DAY },
+      { ticker: MACRO, endpoint: "av:treasury_10y", data: raw.treasury_10y, fetched_at: new Date().toISOString(), ttl_seconds: DAY },
       { onConflict: "ticker,endpoint" },
     );
 
