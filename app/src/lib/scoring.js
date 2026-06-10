@@ -30,6 +30,7 @@ export const INDEXES = [
   { id: "sp500", label: "S&P 500" },
   { id: "djia", label: "Dow 30" },
   { id: "nasdaq100", label: "Nasdaq-100" },
+  { id: "smallcap", label: "Small Caps" },
 ];
 
 export const CYCLE_LABEL = {

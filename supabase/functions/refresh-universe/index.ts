@@ -127,11 +127,66 @@ Deno.serve(async (req) => {
       return json({ sp500: sp500Members.length, djia: DJIA.length, nasdaq100_error: String(e) }, 200);
     }
 
+    // ---- Small Caps (Russell-2000-style: US small-caps by market cap) ----
+    // No free Russell 2000 constituent feed is reachable, so we build an honest
+    // small-cap universe from Nasdaq's screener: all US-listed names filtered to
+    // the small-cap band ($300M–$3B), capped at the ~1,000 largest (most liquid,
+    // best fundamentals coverage). Labeled "Small Caps", not "Russell 2000".
+    let smallcapCount = 0, smallcapNew = 0;
+    const SC_MIN = 3e8, SC_MAX = 3e9, SC_CAP = 1000;
+    try {
+      const sr = await fetch(
+        "https://api.nasdaq.com/api/screener/stocks?tableonly=true&limit=10000&offset=0",
+        { headers: { "User-Agent": UA, "Accept": "application/json" } },
+      );
+      if (sr.ok) {
+        const body = await sr.json() as Any;
+        const rows = (body?.data?.table?.rows ?? []) as Any[];
+        const band: { ticker: string; name: string | null; mc: number }[] = [];
+        for (const row of rows) {
+          const ticker = cleanSym(String(row?.symbol ?? ""));
+          if (!/^[A-Z]{1,5}$/.test(ticker)) continue; // skip warrants/units/preferreds
+          const mc = parseFloat(String(row?.marketCap ?? "").replace(/[$,]/g, ""));
+          if (!Number.isFinite(mc) || mc < SC_MIN || mc > SC_MAX) continue;
+          band.push({ ticker, name: row?.name ? String(row.name).trim() : null, mc });
+        }
+        band.sort((a, b) => b.mc - a.mc);
+        const picked = band.slice(0, SC_CAP);
+
+        const { data: existing } = await supabase.from("watchlist").select("ticker");
+        const have = new Set((existing ?? []).map((r: Any) => r.ticker));
+        const members: { ticker: string; index_name: string }[] = [];
+        const newRows: Record<string, unknown>[] = [];
+        for (const p of picked) {
+          members.push({ ticker: p.ticker, index_name: "smallcap" });
+          if (!have.has(p.ticker)) {
+            newRows.push({ ticker: p.ticker, name: p.name, sector: null, market_cap: p.mc });
+            have.add(p.ticker);
+          }
+        }
+        smallcapCount = members.length;
+        smallcapNew = newRows.length;
+        // Insert in chunks to stay well under request limits.
+        for (let i = 0; i < newRows.length; i += 500) {
+          const nw = await supabase.from("watchlist").upsert(newRows.slice(i, i + 500), { onConflict: "ticker", ignoreDuplicates: true });
+          if (nw.error) return json({ error: `smallcap watchlist: ${nw.error.message}` }, 500);
+        }
+        for (let i = 0; i < members.length; i += 500) {
+          const sm = await supabase.from("index_membership").upsert(members.slice(i, i + 500), { onConflict: "ticker,index_name", ignoreDuplicates: true });
+          if (sm.error) return json({ error: `smallcap membership: ${sm.error.message}` }, 500);
+        }
+      }
+    } catch (e) {
+      return json({ sp500: sp500Members.length, djia: DJIA.length, nasdaq100: nasdaq100Count, smallcap_error: String(e) }, 200);
+    }
+
     return json({
       sp500: sp500Members.length,
       djia: DJIA.length,
       nasdaq100: nasdaq100Count,
       nasdaq100_new_tickers: nasdaqNew,
+      smallcap: smallcapCount,
+      smallcap_new_tickers: smallcapNew,
       watchlist_upserted: watchRows.length,
     });
   } catch (e) {
