@@ -3,6 +3,7 @@ import { supabase } from "./lib/supabase.js";
 import { classify, unified, fmt, INDEXES, CYCLE_LABEL, SIGNALS } from "./lib/scoring.js";
 import Ring from "./components/Ring.jsx";
 import Quadrant from "./components/Quadrant.jsx";
+import StockDetail from "./components/StockDetail.jsx";
 
 function median(xs) {
   const v = xs.filter((x) => x != null).sort((a, b) => a - b);
@@ -24,6 +25,8 @@ export default function App() {
   const [idx, setIdx] = useState("sp500");
   const [sector, setSector] = useState("All");
   const [selected, setSelected] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -79,6 +82,26 @@ export default function App() {
   const sel = rows.find((r) => r.ticker === selected) || ranked.find((r) => r.q != null) || ranked[0];
   const selSig = sel ? classify(sel.q, sel.v, qMed, vMed) : SIGNALS.NA;
   const scoredCount = filtered.filter((r) => r.q != null).length;
+
+  // Lazy-load the full decomposition for one stock when its detail modal opens,
+  // so the initial map stays light. Header data comes from the row we already have.
+  async function openDetail(r) {
+    setDetailLoading(true);
+    setDetail({
+      ticker: r.ticker, name: r.name, sector: r.sector, q: r.q, v: r.v,
+      sig: classify(r.q, r.v, qMed, vMed),
+    });
+    const [qd, vd] = await Promise.all([
+      supabase.from("quality_scores").select("component_detail,piotroski_sub,history_10yr").eq("ticker", r.ticker).maybeSingle(),
+      supabase.from("value_scores").select("component_detail,history_10yr").eq("ticker", r.ticker).maybeSingle(),
+    ]);
+    setDetail((d) => d && d.ticker === r.ticker ? {
+      ...d,
+      qDetail: qd.data?.component_detail, vDetail: vd.data?.component_detail,
+      piotroskiSub: qd.data?.piotroski_sub, qHist: qd.data?.history_10yr, vHist: vd.data?.history_10yr,
+    } : d);
+    setDetailLoading(false);
+  }
 
   return (
     <div className="min-h-screen px-4 py-5 sm:px-8 max-w-[1180px] mx-auto">
@@ -149,6 +172,11 @@ export default function App() {
               <Stat k="P/E" v={fmt(sel.pe, 1)} />
               <Stat k="Confidence" v={sel.confidence || "—"} />
             </dl>
+            <button onClick={() => openDetail(sel)} disabled={sel.q == null}
+              className="mt-4 w-full rounded-md bg-white/[0.06] hover:bg-white/[0.12] disabled:opacity-30 disabled:hover:bg-white/[0.06]
+                text-xs font-medium py-2 transition text-white/85">
+              Show the work →
+            </button>
             <p className="text-white/30 text-[10px] mt-3 leading-snug">
               Boundaries are universe medians (Q {fmt(qMed, 0)} · V {fmt(vMed, 0)}), recomputed as the watchlist changes.
             </p>
@@ -162,8 +190,8 @@ export default function App() {
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-panel text-white/40 text-[11px] uppercase tracking-wide">
               <tr>
-                {["#", "Ticker", "Sector", "Q", "V", "Pio", "Altman", "P/E", "Signal", "Q×V"].map((h) => (
-                  <th key={h} className="px-3 py-2 text-left font-medium whitespace-nowrap">{h}</th>
+                {["#", "Ticker", "Sector", "Q", "V", "Pio", "Altman", "P/E", "Signal", "Q×V", ""].map((h, hi) => (
+                  <th key={hi} className="px-3 py-2 text-left font-medium whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
@@ -184,6 +212,13 @@ export default function App() {
                     <td className="px-3 py-1.5 text-white/60">{fmt(r.pe, 1)}</td>
                     <td className="px-3 py-1.5"><SignalPill sig={sig} /></td>
                     <td className="px-3 py-1.5 font-semibold">{unified(r.q, r.v) == null ? "—" : Math.round(unified(r.q, r.v))}</td>
+                    <td className="px-2 py-1.5 text-right">
+                      {r.q != null && (
+                        <button onClick={(e) => { e.stopPropagation(); setSelected(r.ticker); openDetail(r); }}
+                          aria-label={`Show the work for ${r.ticker}`}
+                          className="text-white/30 hover:text-white px-1 text-base leading-none">›</button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -196,6 +231,8 @@ export default function App() {
         Quality is price-independent (is it a great business?); Value is price-dependent (what am I paying per unit of quality?).
         Regime describes the macro environment — it does not predict turns. Scores are decomposable and for research, not investment advice.
       </footer>
+
+      {detail && <StockDetail data={detail} loading={detailLoading} onClose={() => setDetail(null)} />}
     </div>
   );
 }
