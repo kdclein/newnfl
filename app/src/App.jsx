@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "./lib/supabase.js";
 import { classify, unified, fmt, INDEXES, CYCLE_LABEL, SIGNALS } from "./lib/scoring.js";
 import Ring from "./components/Ring.jsx";
 import Quadrant from "./components/Quadrant.jsx";
 import StockDetail from "./components/StockDetail.jsx";
+import RegimeDetail from "./components/RegimeDetail.jsx";
 
 function median(xs) {
   const v = xs.filter((x) => x != null).sort((a, b) => a - b);
@@ -27,6 +28,8 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [showRegime, setShowRegime] = useState(false);
+  const [view, setView] = useState("stocks"); // "stocks" | "sectors"
 
   useEffect(() => {
     (async () => {
@@ -79,6 +82,27 @@ export default function App() {
     [...filtered].sort((a, b) => (unified(b.q, b.v) ?? -1) - (unified(a.q, a.v) ?? -1)),
     [filtered]);
 
+  // Sector view: median Q/V per sector across the current index universe (the
+  // sector dropdown is ignored here — the point is to compare all sectors).
+  const idxFiltered = useMemo(
+    () => rows.filter((r) => idx === "all" || r.indexes.has(idx)),
+    [rows, idx]);
+  const sectorRows = useMemo(() => {
+    const groups = new Map();
+    idxFiltered.forEach((r) => {
+      if (!r.sector) return;
+      if (!groups.has(r.sector)) groups.set(r.sector, []);
+      groups.get(r.sector).push(r);
+    });
+    return Array.from(groups.entries()).map(([sector, members]) => {
+      const scored = members.filter((m) => m.q != null && m.v != null);
+      const mq = median(scored.map((m) => m.q));
+      const mv = median(scored.map((m) => m.v));
+      return { sector, n: scored.length, total: members.length, mq, mv,
+        u: scored.length ? unified(mq, mv) : null };
+    }).sort((a, b) => (b.u ?? -1) - (a.u ?? -1));
+  }, [idxFiltered]);
+
   const sel = rows.find((r) => r.ticker === selected) || ranked.find((r) => r.q != null) || ranked[0];
   const selSig = sel ? classify(sel.q, sel.v, qMed, vMed) : SIGNALS.NA;
   const scoredCount = filtered.filter((r) => r.q != null).length;
@@ -103,6 +127,42 @@ export default function App() {
     setDetailLoading(false);
   }
 
+  // Deep-linkable detail: opening a stock pushes /stock/TICKER so the breakdown
+  // is shareable and the browser back button closes it. SPA fallback in
+  // netlify.toml serves index.html for these paths on a cold load.
+  function openStock(ticker, push = true) {
+    const r = rows.find((x) => x.ticker === ticker);
+    if (!r) return;
+    setSelected(ticker);
+    openDetail(r);
+    if (push) window.history.pushState({ ticker }, "", `/stock/${encodeURIComponent(ticker)}`);
+  }
+  function closeStock(push = true) {
+    setDetail(null);
+    if (push && window.location.pathname !== "/") window.history.pushState({}, "", "/");
+  }
+  // Keep a live reference so the once-bound popstate listener always sees fresh state.
+  const navRef = useRef();
+  navRef.current = { openStock, closeStock };
+
+  useEffect(() => {
+    const onPop = () => {
+      const m = window.location.pathname.match(/^\/stock\/([^/]+)$/);
+      if (m) navRef.current.openStock(decodeURIComponent(m[1]).toUpperCase(), false);
+      else navRef.current.closeStock(false);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  // Honor /stock/TICKER on first load, once the universe has loaded.
+  useEffect(() => {
+    if (loading) return;
+    const m = window.location.pathname.match(/^\/stock\/([^/]+)$/);
+    if (m) navRef.current.openStock(decodeURIComponent(m[1]).toUpperCase(), false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
+
   return (
     <div className="min-h-screen px-4 py-5 sm:px-8 max-w-[1180px] mx-auto">
       <header className="mb-5 flex items-baseline justify-between flex-wrap gap-2">
@@ -112,7 +172,7 @@ export default function App() {
           </h1>
           <p className="text-white/40 text-xs font-mono mt-0.5">Numbers · Fundamentals · Logic — show the work</p>
         </div>
-        <RegimeBanner regime={regime} />
+        <RegimeBanner regime={regime} onClick={() => setShowRegime(true)} />
       </header>
 
       {/* Toggles */}
@@ -172,7 +232,7 @@ export default function App() {
               <Stat k="P/E" v={fmt(sel.pe, 1)} />
               <Stat k="Confidence" v={sel.confidence || "—"} />
             </dl>
-            <button onClick={() => openDetail(sel)} disabled={sel.q == null}
+            <button onClick={() => openStock(sel.ticker)} disabled={sel.q == null}
               className="mt-4 w-full rounded-md bg-white/[0.06] hover:bg-white/[0.12] disabled:opacity-30 disabled:hover:bg-white/[0.06]
                 text-xs font-medium py-2 transition text-white/85">
               Show the work →
@@ -184,9 +244,22 @@ export default function App() {
         )}
       </div>
 
-      {/* Ranked table */}
+      {/* Bottom table: stocks ranked, or sector medians */}
       <div className="card mt-4 overflow-hidden">
+        <div className="flex items-center gap-1 p-1 border-b border-white/5">
+          {[["stocks", "Stocks"], ["sectors", "Sectors"]].map(([id, label]) => (
+            <button key={id} onClick={() => setView(id)}
+              className={`px-3 py-1 rounded text-xs font-medium transition ${
+                view === id ? "bg-white/10 text-white" : "text-white/45 hover:text-white/80"}`}>
+              {label}
+            </button>
+          ))}
+          <span className="text-white/30 text-[11px] font-mono ml-auto pr-2">
+            {view === "stocks" ? `${ranked.length} names` : `${sectorRows.length} sectors`}
+          </span>
+        </div>
         <div className="max-h-[420px] overflow-y-auto">
+          {view === "stocks" && (
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-panel text-white/40 text-[11px] uppercase tracking-wide">
               <tr>
@@ -214,7 +287,7 @@ export default function App() {
                     <td className="px-3 py-1.5 font-semibold">{unified(r.q, r.v) == null ? "—" : Math.round(unified(r.q, r.v))}</td>
                     <td className="px-2 py-1.5 text-right">
                       {r.q != null && (
-                        <button onClick={(e) => { e.stopPropagation(); setSelected(r.ticker); openDetail(r); }}
+                        <button onClick={(e) => { e.stopPropagation(); openStock(r.ticker); }}
                           aria-label={`Show the work for ${r.ticker}`}
                           className="text-white/30 hover:text-white px-1 text-base leading-none">›</button>
                       )}
@@ -224,6 +297,36 @@ export default function App() {
               })}
             </tbody>
           </table>
+          )}
+
+          {view === "sectors" && (
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-panel text-white/40 text-[11px] uppercase tracking-wide">
+              <tr>
+                {["Sector", "Scored", "Q", "V", "Signal", "Q×V"].map((h) => (
+                  <th key={h} className="px-3 py-2 text-left font-medium whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="font-mono tabular">
+              {sectorRows.map((s) => {
+                const sig = s.n ? classify(s.mq, s.mv, qMed, vMed) : SIGNALS.NA;
+                return (
+                  <tr key={s.sector} onClick={() => { setSector(s.sector); setView("stocks"); }}
+                    title={`Filter the map to ${s.sector}`}
+                    className="border-t border-white/5 cursor-pointer hover:bg-white/[0.03]">
+                    <td className="px-3 py-1.5 font-sans text-white/85 whitespace-nowrap">{s.sector}</td>
+                    <td className="px-3 py-1.5 text-white/45">{s.n}/{s.total}</td>
+                    <td className="px-3 py-1.5" style={{ color: "#5eead4" }}>{s.n ? Math.round(s.mq) : "—"}</td>
+                    <td className="px-3 py-1.5" style={{ color: "#818cf8" }}>{s.n ? Math.round(s.mv) : "—"}</td>
+                    <td className="px-3 py-1.5"><SignalPill sig={sig} /></td>
+                    <td className="px-3 py-1.5 font-semibold">{s.u == null ? "—" : Math.round(s.u)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          )}
         </div>
       </div>
 
@@ -232,7 +335,8 @@ export default function App() {
         Regime describes the macro environment — it does not predict turns. Scores are decomposable and for research, not investment advice.
       </footer>
 
-      {detail && <StockDetail data={detail} loading={detailLoading} onClose={() => setDetail(null)} />}
+      {detail && <StockDetail data={detail} loading={detailLoading} onClose={() => closeStock(true)} />}
+      {showRegime && <RegimeDetail regime={regime} onClose={() => setShowRegime(false)} />}
     </div>
   );
 }
@@ -244,10 +348,11 @@ const Stat = ({ k, v }) => (
   </>
 );
 
-function RegimeBanner({ regime }) {
+function RegimeBanner({ regime, onClick }) {
   if (!regime) return <div className="text-white/30 text-xs font-mono">regime: pending</div>;
   return (
-    <div className="card px-3 py-2 flex items-center gap-3">
+    <button onClick={onClick} title="See the macro indicators"
+      className="card px-3 py-2 flex items-center gap-3 text-left hover:bg-white/[0.04] transition">
       <Ring value={regime.composite_score != null ? Number(regime.composite_score) : null} size={42} stroke={4} color="#f59e0b" />
       <div className="leading-tight">
         <div className="text-[10px] uppercase tracking-wider text-white/40">Market regime</div>
@@ -256,6 +361,7 @@ function RegimeBanner({ regime }) {
           recession prob {regime.recession_probability != null ? Math.round(regime.recession_probability * 100) + "%" : "—"}
         </div>
       </div>
-    </div>
+      <span className="text-white/25 text-sm self-center ml-0.5">›</span>
+    </button>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Ring from "./Ring.jsx";
 import Sparkline from "./Sparkline.jsx";
 import { unified } from "../lib/scoring.js";
@@ -52,11 +52,19 @@ function Column({ title, hue, composite, rows, footer }) {
 }
 
 export default function StockDetail({ data, loading, onClose }) {
+  const [copied, setCopied] = useState(false);
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  function copyLink() {
+    navigator.clipboard?.writeText(window.location.href).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {});
+  }
 
   const qRows = components(data?.qDetail, QUALITY_META);
   const vRows = components(data?.vDetail, VALUE_META);
@@ -87,8 +95,14 @@ export default function StockDetail({ data, loading, onClose }) {
             <Ring value={data?.q} color="#5eead4" label="Quality" />
             <Ring value={data?.v} color="#818cf8" label="Value" />
             <Ring value={uni} color="#e8e8f0" label="Q×V" />
-            <button onClick={onClose} aria-label="Close"
-              className="ml-1 self-start text-white/40 hover:text-white text-xl leading-none px-1">×</button>
+            <div className="flex flex-col items-end gap-1 self-start">
+              <button onClick={onClose} aria-label="Close"
+                className="text-white/40 hover:text-white text-xl leading-none px-1">×</button>
+              <button onClick={copyLink} title="Copy a shareable link to this breakdown"
+                className="text-[10px] text-white/40 hover:text-white/80 transition whitespace-nowrap">
+                {copied ? "✓ copied" : "🔗 copy link"}
+              </button>
+            </div>
           </div>
         </div>
 
