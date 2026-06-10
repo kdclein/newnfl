@@ -1,0 +1,9 @@
+-- Sector backfill for the small-cap universe.
+-- Nasdaq's screener (the small-cap source) carries no sector, so the
+-- backfill-sectors edge function pulls Finnhub's company profile and maps its
+-- industry taxonomy onto the same 11 GICS sectors the large caps use. An
+-- every-minute cron drains the null-sector backlog (~10 names/run, paced under
+-- Finnhub's 60 req/min ceiling alongside the stock-refresh cron), then no-ops.
+-- select cron.schedule('newnfl-backfill-sectors', '* * * * *',
+--   $$select net.http_post(.../functions/v1/backfill-sectors..., bearer <ANON_KEY>)$$);
+-- (the anon bearer is injected at deploy time; applied to the live project)
