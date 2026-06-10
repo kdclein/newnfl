@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import Ring from "./Ring.jsx";
 import Sparkline from "./Sparkline.jsx";
+import StockSummary from "./StockSummary.jsx";
 import { unified } from "../lib/scoring.js";
 import { QUALITY_META, VALUE_META, PIOTROSKI_LABELS, components, scoreColor, naReason, isFinancial } from "../lib/detail.js";
 
@@ -107,6 +108,8 @@ export default function StockDetail({ data, loading, onClose }) {
             </div>
           </div>
         </div>
+
+        {data?.ticker && <StockSummary ticker={data.ticker} />}
 
         {loading ? (
           <div className="h-48 grid place-items-center text-white/30 text-sm">loading the breakdown…</div>
