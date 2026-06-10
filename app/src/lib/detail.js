@@ -128,3 +128,30 @@ export function scoreColor(score) {
   if (score >= 34) return "#fbbf24";
   return "#f87171";
 }
+
+const FINANCIAL = new Set(["Financials", "Real Estate"]);
+export const isFinancial = (sector) => FINANCIAL.has(sector);
+
+// Why a component is n/a — sector-aware, so financial-sector exclusions read as
+// "by design" rather than "broken". Several metrics genuinely don't apply to
+// banks/insurers/REITs (no working capital, gross margin, or undistorted FCF).
+export function naReason(key, sector) {
+  const fin = isFinancial(sector);
+  switch (key) {
+    case "altman": return fin ? "Altman Z excludes banks & insurers" : "needs full balance-sheet history";
+    case "roic": return fin ? "not meaningful for financials" : "needs operating income & invested capital";
+    case "competitive_position": return fin ? "no gross margin for financials" : "no gross-margin history";
+    case "dcf": return fin ? "cash flow distorted by float / reserves" : "needs positive free cash flow";
+    case "graham": return "needs positive earnings & book value";
+    case "earnings_yield": return "no earnings yield or Treasury yet";
+    case "fcf_yield": return "no free-cash-flow yield";
+    case "pe_vs_sector": return "no positive P/E";
+    case "ev_ebitda": return "no EV/EBITDA";
+    case "dividend": return "pays no dividend";
+    case "piotroski": return "needs 2+ years of statements";
+    case "earnings_quality": return "needs cash flow & net income";
+    case "revenue_stability": return "needs multi-year revenue";
+    case "management": return "no insider / goodwill data";
+    default: return "insufficient data";
+  }
+}

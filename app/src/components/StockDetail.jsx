@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import Ring from "./Ring.jsx";
 import Sparkline from "./Sparkline.jsx";
 import { unified } from "../lib/scoring.js";
-import { QUALITY_META, VALUE_META, PIOTROSKI_LABELS, components, scoreColor } from "../lib/detail.js";
+import { QUALITY_META, VALUE_META, PIOTROSKI_LABELS, components, scoreColor, naReason, isFinancial } from "../lib/detail.js";
 
 // A single component of a score: name + what it measures, a 0-100 bar, its
 // weight, the points it contributes to the composite, and the raw metrics.
-function ComponentRow({ c }) {
+function ComponentRow({ c, sector }) {
   const w = c.score == null ? 0 : Math.max(0, Math.min(100, c.score));
   return (
     <div className="py-2.5 border-t border-white/5 first:border-t-0">
@@ -28,24 +28,26 @@ function ComponentRow({ c }) {
             <span className="text-white/35">{k} </span><span className="text-white/80">{val}</span>
           </span>
         ))}
-        {c.contribution != null && (
-          <span className="font-mono text-[11px] tabular ml-auto text-white/45">
-            +{c.contribution.toFixed(1)} pts
-          </span>
-        )}
+        {c.score == null
+          ? <span className="text-[10px] italic ml-auto text-white/35">{naReason(c.key, sector)}</span>
+          : c.contribution != null && (
+            <span className="font-mono text-[11px] tabular ml-auto text-white/45">
+              +{c.contribution.toFixed(1)} pts
+            </span>
+          )}
       </div>
     </div>
   );
 }
 
-function Column({ title, hue, composite, rows, footer }) {
+function Column({ title, hue, composite, rows, sector, footer }) {
   return (
     <section className="card p-4">
       <div className="flex items-center justify-between mb-1">
         <h3 className="text-xs uppercase tracking-wider font-semibold" style={{ color: hue }}>{title}</h3>
         <span className="font-mono tabular text-sm text-white/80">{composite == null ? "—" : Math.round(composite)}</span>
       </div>
-      {rows.map((c) => <ComponentRow key={c.key} c={c} />)}
+      {rows.map((c) => <ComponentRow key={c.key} c={c} sector={sector} />)}
       {footer}
     </section>
   );
@@ -110,8 +112,15 @@ export default function StockDetail({ data, loading, onClose }) {
           <div className="h-48 grid place-items-center text-white/30 text-sm">loading the breakdown…</div>
         ) : (
           <>
+            {isFinancial(data?.sector) && (
+              <p className="text-[11px] text-white/45 mt-4 rounded-md bg-amber-400/[0.07] border border-amber-400/20 px-3 py-2 leading-snug">
+                {data.sector} firms have a different balance sheet, so several metrics
+                (Altman Z, ROIC, gross-margin moat, DCF) don't apply and show as <span className="italic">n/a by design</span> —
+                they'd be misleading here, so the model excludes rather than fakes them.
+              </p>
+            )}
             <div className="grid gap-4 md:grid-cols-2 mt-5">
-              <Column title="Quality — is it a great business?" hue="#5eead4" composite={data?.q} rows={qRows}
+              <Column title="Quality — is it a great business?" hue="#5eead4" composite={data?.q} rows={qRows} sector={data?.sector}
                 footer={
                   <div className="border-t border-white/5 mt-1 pt-3">
                     <div className="text-[11px] uppercase tracking-wider text-white/35 mb-2">Piotroski signals</div>
@@ -130,7 +139,7 @@ export default function StockDetail({ data, loading, onClose }) {
                     </div>
                   </div>
                 } />
-              <Column title="Value — what am I paying for it?" hue="#818cf8" composite={data?.v} rows={vRows} />
+              <Column title="Value — what am I paying for it?" hue="#818cf8" composite={data?.v} rows={vRows} sector={data?.sector} />
             </div>
 
             {/* History */}
