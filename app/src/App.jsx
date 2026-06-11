@@ -35,23 +35,37 @@ export default function App() {
   const [view, setView] = useState("stocks"); // "stocks" | "sectors"
 
   useEffect(() => {
+    // PostgREST caps each response at 1000 rows, so page through anything that
+    // can exceed that (the universe is now ~1.5k stocks; index_membership ~1.6k).
+    async function fetchAll(table, columns) {
+      const PAGE = 1000;
+      let from = 0, out = [];
+      for (;;) {
+        const { data, error } = await supabase.from(table).select(columns).range(from, from + PAGE - 1);
+        if (error || !data || !data.length) break;
+        out = out.concat(data);
+        if (data.length < PAGE) break;
+        from += PAGE;
+      }
+      return out;
+    }
     (async () => {
-      const [wl, qs, vs, rg, us, im] = await Promise.all([
-        supabase.from("watchlist").select("ticker,name,sector"),
-        supabase.from("quality_scores").select("ticker,composite_score,confidence,piotroski_score,altman_z,altman_zone"),
-        supabase.from("value_scores").select("ticker,composite_score,price,dcf_intrinsic,pe_ratio,margin_of_safety"),
+      const [wlD, qsD, vsD, imD, rg, us] = await Promise.all([
+        fetchAll("watchlist", "ticker,name,sector"),
+        fetchAll("quality_scores", "ticker,composite_score,confidence,piotroski_score,altman_z,altman_zone"),
+        fetchAll("value_scores", "ticker,composite_score,price,dcf_intrinsic,pe_ratio,margin_of_safety"),
+        fetchAll("index_membership", "ticker,index_name"),
         supabase.from("regime").select("*").maybeSingle(),
         supabase.from("universe_stats").select("*").maybeSingle(),
-        supabase.from("index_membership").select("ticker,index_name"),
       ]);
-      const qm = new Map((qs.data || []).map((r) => [r.ticker, r]));
-      const vm = new Map((vs.data || []).map((r) => [r.ticker, r]));
+      const qm = new Map(qsD.map((r) => [r.ticker, r]));
+      const vm = new Map(vsD.map((r) => [r.ticker, r]));
       const members = new Map();
-      (im.data || []).forEach((m) => {
+      imD.forEach((m) => {
         if (!members.has(m.ticker)) members.set(m.ticker, new Set());
         members.get(m.ticker).add(m.index_name);
       });
-      const merged = (wl.data || []).map((w) => {
+      const merged = wlD.map((w) => {
         const q = qm.get(w.ticker), v = vm.get(w.ticker);
         return {
           ...w,
