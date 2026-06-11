@@ -26,6 +26,8 @@ export default function App() {
   const [idx, setIdx] = useState("sp500");
   const [sector, setSector] = useState("All");
   const [sigFilter, setSigFilter] = useState("ALL");
+  const [query, setQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -110,6 +112,20 @@ export default function App() {
   const selSig = sel ? classify(sel.q, sel.v, qMed, vMed) : SIGNALS.NA;
   const scoredCount = filtered.filter((r) => r.q != null).length;
 
+  // Ticker / company search across the whole universe (ignores the active filters).
+  const matches = useMemo(() => {
+    const t = query.trim().toUpperCase();
+    if (!t) return [];
+    const starts = [], contains = [];
+    for (const r of rows) {
+      const tk = r.ticker, nm = (r.name || "").toUpperCase();
+      if (tk === t) { starts.unshift(r); continue; }
+      if (tk.startsWith(t)) starts.push(r);
+      else if (tk.includes(t) || nm.includes(t)) contains.push(r);
+    }
+    return [...starts, ...contains].slice(0, 8);
+  }, [query, rows]);
+
   // Lazy-load the full decomposition for one stock when its detail modal opens,
   // so the initial map stays light. Header data comes from the row we already have.
   async function openDetail(r) {
@@ -180,6 +196,37 @@ export default function App() {
 
       {/* Toggles */}
       <div className="flex flex-wrap items-center gap-2 mb-2">
+        <div className="relative">
+          <input
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setSearchOpen(true); }}
+            onFocus={() => setSearchOpen(true)}
+            onBlur={() => setTimeout(() => setSearchOpen(false), 150)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && matches[0]) { openStock(matches[0].ticker); setQuery(""); setSearchOpen(false); e.currentTarget.blur(); }
+              if (e.key === "Escape") { setQuery(""); setSearchOpen(false); }
+            }}
+            placeholder="🔍 Search ticker or company…"
+            className="card px-3 py-1.5 text-xs bg-transparent text-white/85 outline-none w-52 placeholder:text-white/30" />
+          {searchOpen && matches.length > 0 && (
+            <div className="absolute z-30 mt-1 w-72 card p-1 max-h-72 overflow-y-auto">
+              {matches.map((r) => {
+                const sig = classify(r.q, r.v, qMed, vMed);
+                return (
+                  <button key={r.ticker} onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => { openStock(r.ticker); setQuery(""); setSearchOpen(false); }}
+                    className="w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded hover:bg-white/[0.06] text-left">
+                    <span className="min-w-0 flex items-baseline gap-2">
+                      <span className="font-mono font-semibold text-sm text-white/90">{r.ticker}</span>
+                      <span className="text-white/45 text-[11px] truncate">{r.name}</span>
+                    </span>
+                    {r.q != null ? <SignalPill sig={sig} /> : <span className="text-white/25 text-[10px] whitespace-nowrap">unscored</span>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
         <div className="flex gap-1 card p-1">
           {INDEXES.map((i) => (
             <button key={i.id} onClick={() => setIdx(i.id)}

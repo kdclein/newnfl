@@ -132,14 +132,21 @@ Deno.serve(async (req) => {
 
     const now = new Date().toISOString();
     const errors: string[] = [];
-    const q = await supabase.from("quality_scores").upsert({ ticker, ...quality, computed_at: now }, { onConflict: "ticker" });
-    if (q.error) errors.push(`quality: ${q.error.message}`);
-    const v = await supabase.from("value_scores").upsert({ ticker, ...value, computed_at: now }, { onConflict: "ticker" });
-    if (v.error) errors.push(`value: ${v.error.message}`);
+    // Persistence guard: never overwrite an existing score with a null/empty one
+    // produced by a transient or sparse refresh. A finite composite always writes
+    // (even if lower); a failed computation leaves the last good row in place, so
+    // a stock that was scored never blanks out as the refresh cron turns over.
+    if (isFiniteNum(quality.composite_score as number)) {
+      const q = await supabase.from("quality_scores").upsert({ ticker, ...quality, computed_at: now }, { onConflict: "ticker" });
+      if (q.error) errors.push(`quality: ${q.error.message}`);
+    }
+    if (isFiniteNum(value.composite_score as number)) {
+      const v = await supabase.from("value_scores").upsert({ ticker, ...value, computed_at: now }, { onConflict: "ticker" });
+      if (v.error) errors.push(`value: ${v.error.message}`);
+    }
     await supabase.from("watchlist").update({ last_refreshed: now }).eq("ticker", ticker);
-    // Relative-value metrics (sector P/E, FCF/EV percentiles) need the whole
-    // universe, so recompute them across all stocks before the medians.
-    await supabase.rpc("recompute_cross_sectional");
+    // Relative-value metrics are recomputed by the every-minute cross-sectional
+    // cron; here we just refresh the median boundaries for this stock's write.
     await supabase.rpc("recompute_universe_stats");
 
     if (errors.length) return json({ ticker, errors }, 500);
