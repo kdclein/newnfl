@@ -128,6 +128,22 @@ Deno.serve(async (req) => {
     }
 
     const quality = computeQualityScore({ income, balance, cashflow, metrics, ratios, score, insiders: insiders ?? undefined });
+
+    // Backstop: feed Finnhub's standalone valuation metrics (peTTM, FCF yield,
+    // EV/EBITDA, dividend, BVPS) into the value score even when full statements
+    // aren't available — recent spinoffs, secondary share classes, and dot-tickers
+    // (BRK.B, GOOG, FedEx Freight, etc.) have a known P/E in Finnhub's metric feed
+    // but <2 years of parsed 10-Ks, and were dropping off the map with a null value.
+    if (!metrics || !metrics.length) metrics = [{}];
+    if (!ratios || !ratios.length) ratios = [{}];
+    const vm0 = metrics[0] as Any, vr0 = ratios[0] as Any;
+    if (vm0.earningsYield == null && fh.earningsYield != null) vm0.earningsYield = fh.earningsYield;
+    if (vm0.freeCashFlowYield == null && fh.fcfYield != null) vm0.freeCashFlowYield = fh.fcfYield;
+    if (vm0.evToEBITDA == null && fh.evEbitda != null) vm0.evToEBITDA = fh.evEbitda;
+    if (vr0.priceToEarningsRatio == null && fh.peTTM != null) vr0.priceToEarningsRatio = fh.peTTM;
+    if (vr0.dividendYield == null && fh.dividendYield != null) vr0.dividendYield = fh.dividendYield;
+    if (vr0.bookValuePerShare == null && fh.bookValuePerShare != null) vr0.bookValuePerShare = fh.bookValuePerShare;
+
     const value = computeValueScore({ income, metrics, ratios, dcf, profile: [{ price }], price, treasury10y });
 
     const now = new Date().toISOString();
