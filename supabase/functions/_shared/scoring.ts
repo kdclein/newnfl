@@ -115,10 +115,16 @@ export function computeQualityScore(raw: QualityRaw) {
   const insiderRatio = absShares > 0 ? netShares / absShares : NaN; // -1..1
   const goodwill = num(raw.balance?.[0]?.goodwill, 0);
   const goodwillRatio = isFiniteNum(totalAssets) && totalAssets > 0 ? goodwill / totalAssets : NaN;
-  const buyScore = isFiniteNum(insiderRatio) ? linMap(insiderRatio, -1, 1, 20, 90) : 50;
-  const goodwillScore = isFiniteNum(goodwillRatio) ? linMap(goodwillRatio, 0.4, 0, 40, 80) : 50;
+  const hasInsider = isFiniteNum(insiderRatio);
+  const hasGoodwill = isFiniteNum(goodwillRatio);
+  const buyScore = hasInsider ? linMap(insiderRatio, -1, 1, 20, 90) : 50;
+  const goodwillScore = hasGoodwill ? linMap(goodwillRatio, 0.4, 0, 40, 80) : 50;
   const cManagement: Component = {
-    weight: W, score: clamp(0.7 * buyScore + 0.3 * goodwillScore),
+    // With NO real management inputs this used to default to a flat 50, which —
+    // for names that also have no statements — became the sole present component
+    // and produced a bogus composite of exactly 50 (a horizontal line of dots on
+    // the Quality axis). Score it only when at least one real input exists.
+    weight: W, score: (hasInsider || hasGoodwill) ? clamp(0.7 * buyScore + 0.3 * goodwillScore) : NaN,
     raw: { insider_net_ratio: insiderRatio, goodwill_to_assets: goodwillRatio },
   };
 
@@ -147,13 +153,20 @@ export function computeQualityScore(raw: QualityRaw) {
     revenue_stability: cRevenue, management: cManagement, competitive_position: cMoat,
   };
 
+  // Management is the only "soft" component (an insider/goodwill prior). It must
+  // never stand alone: a name with no statements but some insider filings would
+  // otherwise be scored purely on management and plotted as a real quality dot.
+  // Require at least one hard (fundamentals-derived) component, else no composite.
+  const hardKeys = ["piotroski", "altman", "roic", "earnings_quality", "revenue_stability", "competitive_position"];
+  const hasHard = hardKeys.some((k) => isFiniteNum(components[k].score));
+
   // Confidence: management is inherently soft; downgrade when key series are thin.
   // FMP's free tier caps history at 5 annual periods, so "high" needs >=5 years.
   const missing = Object.values(components).filter((c) => !isFiniteNum(c.score)).length;
   const confidence = missing >= 2 ? "low" : roic.length >= 5 && revenue.length >= 5 ? "high" : "medium";
 
   return {
-    composite_score: composite(components),
+    composite_score: hasHard ? composite(components) : NaN,
     piotroski_score: isFiniteNum(piotroski) ? piotroski : null,
     piotroski_sub: scoreObj.piotroskiScoreDetail ?? null,
     altman_z: isFiniteNum(z) ? z : null,
