@@ -30,11 +30,19 @@ const TAGS: Record<string, string[]> = {
 type Any = any;
 
 // Find the first matching concept across all report sections (ic / bs / cf).
+// Finnhub is inconsistent about the taxonomy prefix: most filings tag concepts
+// as `us-gaap_NetIncomeLoss`, but some (often older filings, e.g. Brown-Forman's)
+// drop it entirely and report a bare `NetIncomeLoss`. Match either form — and any
+// other taxonomy prefix — by comparing the bare concept or its `_`-suffix. The
+// tag names are long and distinctive, so suffix matching is unambiguous.
 function pick(report: Any, tags: string[]): number | undefined {
   for (const section of ["ic", "bs", "cf"]) {
     const arr: Any[] = report?.[section] ?? [];
     for (const tag of tags) {
-      const hit = arr.find((e) => e?.concept === `us-gaap_${tag}`);
+      const hit = arr.find((e) => {
+        const c = String(e?.concept ?? "");
+        return c === tag || c === `us-gaap_${tag}` || c.endsWith(`_${tag}`);
+      });
       const v = hit ? Number(hit.value) : NaN;
       if (isFiniteNum(v)) return v;
     }

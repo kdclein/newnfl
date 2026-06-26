@@ -6,6 +6,7 @@
 // UI can "show the work" (principle #4). Missing data lowers confidence and is
 // excluded from the composite rather than silently scored as zero.
 import { clamp, coeffVar, isFiniteNum, linMap, mean, num, slope } from "./math.ts";
+import type { FinnhubMetrics } from "./finnhub.ts";
 
 // FMP statement arrays come newest-first; reverse to oldest->newest for trends.
 type Row = Record<string, unknown>;
@@ -179,6 +180,57 @@ export function computeQualityScore(raw: QualityRaw) {
     history_10yr: {
       roic: oldestFirst(roic), revenue: oldestFirst(revenue), gross_margin: oldestFirst(margins),
     },
+  };
+}
+
+// Quality backstop — a reduced, TTM-snapshot quality read for names where the
+// statement pipeline yields nothing usable (no parseable annual filings, or only
+// stale ones). Built entirely from Finnhub's `metric` feed — the same source the
+// value backstop uses — so it covers ADRs/foreign filers and thinly-covered
+// small caps that have no SEC-style statements. It is level-only (no multi-year
+// trend, no Piotroski/Altman), so it is always reported at "low" confidence and
+// flagged `_basis: "ttm_metrics"` for the UI. Returns the same row shape as
+// computeQualityScore so callers can persist it interchangeably.
+export function computeQualityBackstop(m: FinnhubMetrics) {
+  const comps: Components = {};
+  // 1. Returns on capital (ROIC level vs WACC). Finnhub gives roic in percent.
+  const roic = isFiniteNum(m.roic) ? m.roic! / 100 : NaN;
+  if (isFiniteNum(roic)) {
+    comps.roic = { weight: 1, score: linMap(roic - WACC_ESTIMATE, -0.05, 0.15, 0, 100), raw: { roic_current: roic } };
+  }
+  // 2. Competitive position / moat (gross-margin level).
+  const gm = isFiniteNum(m.grossMargin) ? m.grossMargin! / 100 : NaN;
+  if (isFiniteNum(gm)) {
+    comps.competitive_position = { weight: 1, score: linMap(gm, 0.10, 0.60, 30, 90), raw: { gross_margin_current: gm } };
+  }
+  // 3. Profitability (net margin, else operating margin, else ROA).
+  const prof = isFiniteNum(m.netMargin) ? m.netMargin! / 100
+    : isFiniteNum(m.operatingMargin) ? m.operatingMargin! / 100
+    : isFiniteNum(m.roa) ? m.roa! / 100 : NaN;
+  if (isFiniteNum(prof)) {
+    comps.profitability = { weight: 1, score: linMap(prof, 0, 0.25, 30, 95), raw: { net_margin: prof } };
+  }
+  // 4. Balance-sheet health (current ratio + leverage; lower debt/equity is better).
+  const crScore = isFiniteNum(m.currentRatio) ? linMap(m.currentRatio!, 0.8, 2.5, 25, 90) : NaN;
+  const deScore = isFiniteNum(m.debtToEquity) ? linMap(m.debtToEquity!, 2.0, 0.0, 20, 90) : NaN;
+  const healthParts = [crScore, deScore].filter(isFiniteNum);
+  if (healthParts.length) {
+    comps.balance_health = {
+      weight: 1, score: healthParts.reduce((a, b) => a + b, 0) / healthParts.length,
+      raw: { current_ratio: nz(m.currentRatio), debt_to_equity: nz(m.debtToEquity) },
+    };
+  }
+
+  const present = Object.values(comps).filter((c) => isFiniteNum(c.score));
+  return {
+    composite_score: present.length ? composite(comps) : NaN,
+    piotroski_score: null, piotroski_sub: null, altman_z: null, altman_zone: "unknown",
+    roic_current: nz(roic), roic_10yr_avg: null, roic_trend: null,
+    earnings_quality: null, accrual_ratio: null, revenue_cv: null,
+    management_score: null, moat_score: comps.competitive_position?.score ?? null,
+    confidence: "low",
+    component_detail: { ...comps, _basis: "ttm_metrics" },
+    history_10yr: { roic: [], revenue: [], gross_margin: [] },
   };
 }
 
