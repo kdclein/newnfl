@@ -301,6 +301,23 @@ export function computeFinancialQuality(m: FinnhubMetrics, records: AnnualRecord
     };
   }
 
+  // Capital adequacy & funding — bank-only (gated on deposits). Capital adequacy
+  // uses common equity / assets (a tangible-leverage-ratio proxy; regulatory CET1
+  // isn't in the free feed) — more cushion is safer. Loan-to-deposit gauges
+  // funding: a moderate ratio (~85%) is healthiest; far above ~100% leans on
+  // flightier wholesale funding, far below means under-deployed deposits.
+  const deposits = num(r0.deposits);
+  const equity = num(r0.equity);
+  const isBank = isFiniteNum(deposits) && deposits > 0;
+  const capRatio = isFiniteNum(equity) && isFiniteNum(assets) && assets > 0 ? equity / assets : NaN;
+  if (isBank && isFiniteNum(capRatio)) {
+    comps.capital_adequacy = { weight: 1, score: linMap(capRatio, 0.05, 0.14, 25, 95), raw: { equity_to_assets: capRatio } };
+  }
+  const ldr = isBank && isFiniteNum(grossLoans) ? grossLoans / deposits : NaN;
+  if (isFiniteNum(ldr)) {
+    comps.loan_to_deposit = { weight: 1, score: clamp(90 - Math.abs(ldr - 0.85) * 100), raw: { loan_to_deposit: ldr } };
+  }
+
   const hasStatement = isFiniteNum(nim) || isFiniteNum(eff) || isFiniteNum(reserveRatio);
   const confidence = hasStatement ? (records.length >= 3 ? "high" : "medium") : "low";
 

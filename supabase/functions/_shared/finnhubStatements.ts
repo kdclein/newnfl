@@ -33,6 +33,7 @@ const TAGS: Record<string, string[]> = {
   // own tag so the efficiency ratio uses the right denominator — the generic
   // `revenue` field can match a small fee-revenue line on some banks (e.g. WFC).
   bankRevenue: ["RevenuesNetOfInterestExpense"],
+  deposits: ["Deposits", "InterestBearingDepositLiabilities", "DepositsTotal"],
   allowanceForLoanLoss: ["FinancingReceivableAllowanceForCreditLossExcludingAccruedInterest", "FinancingReceivableAllowanceForCreditLosses", "LoansAndLeasesReceivableAllowance", "AllowanceForDoubtfulAccountsReceivable"],
   loansNetOfAllowance: ["FinancingReceivableExcludingAccruedInterestAfterAllowanceForCreditLoss", "LoansAndLeasesReceivableNetReportedAmount", "NotesReceivableNet"],
   provisionForCreditLoss: ["ProvisionForLoanLeaseAndOtherLosses", "ProvisionForLoanAndLeaseLosses", "ProvisionForDoubtfulAccounts"],
@@ -86,7 +87,7 @@ export function parseFinnhubStatements(resp: unknown): AnnualRecord[] {
       shares: pick(r, TAGS.shares),
       netInterestIncome: pick(r, TAGS.netInterestIncome), interestIncome: pick(r, TAGS.interestIncome),
       noninterestExpense: pick(r, TAGS.noninterestExpense), noninterestIncome: pick(r, TAGS.noninterestIncome),
-      bankRevenue: pick(r, TAGS.bankRevenue), allowanceForLoanLoss: pick(r, TAGS.allowanceForLoanLoss),
+      bankRevenue: pick(r, TAGS.bankRevenue), deposits: pick(r, TAGS.deposits), allowanceForLoanLoss: pick(r, TAGS.allowanceForLoanLoss),
       loansNetOfAllowance: pick(r, TAGS.loansNetOfAllowance), provisionForCreditLoss: pick(r, TAGS.provisionForCreditLoss),
       nonaccrualLoans: pick(r, TAGS.nonaccrualLoans),
     });

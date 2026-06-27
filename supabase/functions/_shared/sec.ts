@@ -79,7 +79,7 @@ export interface AnnualRecord {
   // Bank/lender line items (present only for financial filers) — feed the
   // financial-sector quality scorer (NIM, asset yield, efficiency, reserves).
   netInterestIncome?: number; interestIncome?: number; noninterestExpense?: number;
-  noninterestIncome?: number; bankRevenue?: number;
+  noninterestIncome?: number; bankRevenue?: number; deposits?: number;
   allowanceForLoanLoss?: number; loansNetOfAllowance?: number;
   provisionForCreditLoss?: number; nonaccrualLoans?: number;
 }

@@ -102,6 +102,16 @@ export const FINANCIAL_QUALITY_META = [
       ["Provision / loans", pct(r.provision_ratio)],
     ],
   },
+  {
+    key: "capital_adequacy", label: "Capital Adequacy",
+    blurb: "Common equity over assets — the loss-absorbing cushion (a tangible-leverage proxy for regulatory CET1). More capital is safer.",
+    metrics: (r) => [["Equity / assets", pct(r.equity_to_assets)]],
+  },
+  {
+    key: "loan_to_deposit", label: "Loan-to-Deposit Ratio",
+    blurb: "Loans funded by deposits. Around ~85% is healthiest; far above ~100% leans on flightier wholesale funding, far below means deposits are under-deployed.",
+    metrics: (r) => [["Loans / deposits", pct(r.loan_to_deposit)]],
+  },
 ];
 
 export const VALUE_META = [
@@ -207,6 +217,8 @@ export function naReason(key, sector) {
     case "nim": return "no net-interest-income statement data";
     case "efficiency": return "no noninterest-expense statement data";
     case "credit_quality": return "no nonperforming-loan disclosure to score";
+    case "capital_adequacy": return "no equity / asset data";
+    case "loan_to_deposit": return "no deposit data (non-bank financial)";
     // ttm-metric backstop components
     case "profitability": return "no margin data";
     case "balance_health": return "no balance-sheet ratios";
