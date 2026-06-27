@@ -3,7 +3,7 @@ import Ring from "./Ring.jsx";
 import Sparkline from "./Sparkline.jsx";
 import StockSummary from "./StockSummary.jsx";
 import { unified } from "../lib/scoring.js";
-import { QUALITY_META, VALUE_META, PIOTROSKI_LABELS, components, scoreColor, naReason, isFinancial } from "../lib/detail.js";
+import { QUALITY_META, FINANCIAL_QUALITY_META, VALUE_META, PIOTROSKI_LABELS, components, scoreColor, naReason, isFinancial } from "../lib/detail.js";
 
 // A single component of a score: name + what it measures, a 0-100 bar, its
 // weight, the points it contributes to the composite, and the raw metrics.
@@ -69,9 +69,11 @@ export default function StockDetail({ data, loading, onClose }) {
     }).catch(() => {});
   }
 
-  const qRows = components(data?.qDetail, QUALITY_META);
+  const finBasis = data?.qDetail?._basis === "financial";
+  const qRows = components(data?.qDetail, finBasis ? FINANCIAL_QUALITY_META : QUALITY_META);
   const vRows = components(data?.vDetail, VALUE_META);
   const sub = data?.piotroskiSub || {};
+  const showPiotroski = Object.keys(sub).length > 0;
   const qHist = data?.qHist || {};
   const uni = data ? unified(data.q, data.v) : null;
 
@@ -117,14 +119,15 @@ export default function StockDetail({ data, loading, onClose }) {
           <>
             {isFinancial(data?.sector) && (
               <p className="text-[11px] text-white/45 mt-4 rounded-md bg-amber-400/[0.07] border border-amber-400/20 px-3 py-2 leading-snug">
-                {data.sector} firms have a different balance sheet, so several metrics
-                (Altman Z, ROIC, gross-margin moat, DCF) don't apply and show as <span className="italic">n/a by design</span> —
-                they'd be misleading here, so the model excludes rather than fakes them.
+                {data.sector} firms have a different balance sheet, so the industrial metrics
+                (Piotroski, Altman Z, ROIC, gross-margin moat, DCF) don't apply. Quality is scored instead on
+                financial-specific measures — <span className="italic">ROE, ROA, net interest margin, efficiency ratio,
+                and reserve coverage</span> — and Value's Altman/DCF still show <span className="italic">n/a by design</span>.
               </p>
             )}
             <div className="grid gap-4 md:grid-cols-2 mt-5">
               <Column title="Quality — is it a great business?" hue="#5eead4" composite={data?.q} rows={qRows} sector={data?.sector}
-                footer={
+                footer={showPiotroski && (
                   <div className="border-t border-white/5 mt-1 pt-3">
                     <div className="text-[11px] uppercase tracking-wider text-white/35 mb-2">Piotroski signals</div>
                     <div className="grid grid-cols-1 gap-y-1">
@@ -141,7 +144,7 @@ export default function StockDetail({ data, loading, onClose }) {
                       })}
                     </div>
                   </div>
-                } />
+                )} />
               <Column title="Value — what am I paying for it?" hue="#818cf8" composite={data?.v} rows={vRows} sector={data?.sector} />
             </div>
 

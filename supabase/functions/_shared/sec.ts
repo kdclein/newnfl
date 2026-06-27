@@ -76,6 +76,12 @@ export interface AnnualRecord {
   assets?: number; currentAssets?: number; currentLiabilities?: number;
   liabilities?: number; equity?: number; retainedEarnings?: number;
   longTermDebt?: number; goodwill?: number; shares?: number;
+  // Bank/lender line items (present only for financial filers) — feed the
+  // financial-sector quality scorer (NIM, asset yield, efficiency, reserves).
+  netInterestIncome?: number; interestIncome?: number; noninterestExpense?: number;
+  noninterestIncome?: number; bankRevenue?: number;
+  allowanceForLoanLoss?: number; loansNetOfAllowance?: number;
+  provisionForCreditLoss?: number; nonaccrualLoans?: number;
 }
 
 /** Fetch + normalize up to 6 most-recent fiscal years for a zero-padded CIK. */

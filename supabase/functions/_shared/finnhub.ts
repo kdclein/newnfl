@@ -7,7 +7,7 @@ export interface FinnhubMetrics {
   // Quality TTM snapshots (percent or ratio as noted) — used by the quality
   // backstop for names with no parseable annual statements. roic/margins are in
   // percent (10.66 == 10.66%); currentRatio and debtToEquity are plain ratios.
-  roic?: number; roa?: number; grossMargin?: number; operatingMargin?: number;
+  roic?: number; roa?: number; roe?: number; grossMargin?: number; operatingMargin?: number;
   netMargin?: number; currentRatio?: number; debtToEquity?: number;
 }
 
@@ -30,6 +30,7 @@ export function parseFinnhubMetric(resp: unknown): FinnhubMetrics {
     marketCap: isFiniteNum(mcapM) ? mcapM * 1e6 : undefined,
     roic: opt(num(m.roiTTM ?? m.roiAnnual)),
     roa: opt(num(m.roaTTM ?? m.roaRfy ?? m.roaAnnual)),
+    roe: opt(num(m.roeTTM ?? m.roeRfy ?? m.roeAnnual)),
     grossMargin: opt(num(m.grossMarginTTM ?? m.grossMarginAnnual)),
     operatingMargin: opt(num(m.operatingMarginTTM ?? m.operatingMarginAnnual)),
     netMargin: opt(num(m.netProfitMarginTTM ?? m.netProfitMarginAnnual)),

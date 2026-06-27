@@ -7,6 +7,7 @@
 // excluded from the composite rather than silently scored as zero.
 import { clamp, coeffVar, isFiniteNum, linMap, mean, num, slope } from "./math.ts";
 import type { FinnhubMetrics } from "./finnhub.ts";
+import type { AnnualRecord } from "./sec.ts";
 
 // FMP statement arrays come newest-first; reverse to oldest->newest for trends.
 type Row = Record<string, unknown>;
@@ -231,6 +232,88 @@ export function computeQualityBackstop(m: FinnhubMetrics) {
     confidence: "low",
     component_detail: { ...comps, _basis: "ttm_metrics" },
     history_10yr: { roic: [], revenue: [], gross_margin: [] },
+  };
+}
+
+// Financial-sector quality scorer. The industrial metrics (Piotroski, Altman,
+// ROIC, gross-margin moat, FCF DCF) are undefined or misleading for banks /
+// insurers / REITs — no working capital, no COGS/gross margin, leverage is the
+// business model, and cash flow is distorted by loan & deposit flows. So for
+// `isFinancial` names we score the dimensions that actually describe a financial:
+// profitability (ROE, ROA — from Finnhub's metric feed), the lending spread (net
+// interest margin + asset yield), operating discipline (efficiency ratio), and
+// credit quality (loan-loss reserves vs loans & nonperforming loans). Margin and
+// credit inputs come from the parsed statements; ROE/ROA fall back to the metric
+// feed so even foreign banks with no statements still score on profitability.
+export function computeFinancialQuality(m: FinnhubMetrics, records: AnnualRecord[], opts?: { excludeROE?: boolean }) {
+  const r0 = records[0] ?? {} as AnnualRecord;
+  const comps: Components = {};
+
+  // Profitability (ROE / ROA) — Finnhub reports these in percent (16.32 == 16.32%).
+  // REITs are scored on ROA only: their book equity is eroded by depreciation, so
+  // ROE is artificially inflated (often >100%) and not a quality signal. Also skip
+  // any implausible ROE (>60%) as an equity-distortion artifact rather than merit.
+  const isREIT = !!opts?.excludeROE; // excludeROE is set only for Real Estate
+  const roeOk = isFiniteNum(m.roe) && !isREIT && m.roe! <= 60;
+  if (roeOk) comps.roe = { weight: 1, score: linMap(m.roe!, 4, 16, 25, 95), raw: { roe: m.roe } };
+  if (isFiniteNum(m.roa)) {
+    // REIT assets earn far more than a bank's (no deposit drag), so they need a
+    // higher ROA band or every REIT pegs the bank scale at 95.
+    const roaScore = isREIT ? linMap(m.roa!, 1, 8, 30, 95) : linMap(m.roa!, 0.4, 1.4, 25, 95);
+    comps.roa = { weight: 1, score: roaScore, raw: { roa: m.roa } };
+  }
+
+  // Lending spread — net interest margin (NII / assets) + asset yield (interest income / assets).
+  const assets = num(r0.assets);
+  const nii = num(r0.netInterestIncome);
+  const nim = isFiniteNum(nii) && isFiniteNum(assets) && assets > 0 ? nii / assets : NaN;
+  const assetYield = isFiniteNum(num(r0.interestIncome)) && isFiniteNum(assets) && assets > 0 ? num(r0.interestIncome) / assets : NaN;
+  if (isFiniteNum(nim)) {
+    comps.nim = { weight: 1, score: linMap(nim, 0.015, 0.045, 30, 92), raw: { nim, asset_yield: nz(assetYield) } };
+  }
+
+  // Operating discipline — efficiency ratio (noninterest expense / total net revenue);
+  // lower is better. Use the bank total-revenue tag, falling back to NII + noninterest
+  // income, then the generic revenue field (the generic field alone can be a small
+  // fee-revenue line on some banks, which would blow the ratio past 100%).
+  const totalRev = isFiniteNum(num(r0.bankRevenue)) ? num(r0.bankRevenue)
+    : (isFiniteNum(nii) && isFiniteNum(num(r0.noninterestIncome)) ? nii + num(r0.noninterestIncome) : num(r0.revenue));
+  const eff = isFiniteNum(num(r0.noninterestExpense)) && isFiniteNum(totalRev) && totalRev > 0 ? num(r0.noninterestExpense) / totalRev : NaN;
+  if (isFiniteNum(eff)) comps.efficiency = { weight: 1, score: linMap(eff, 0.75, 0.45, 20, 95), raw: { efficiency_ratio: eff } };
+
+  // Credit quality — reserves vs loans and nonperforming loans. Gross loans =
+  // loans-net-of-allowance + allowance (both us-gaap; company-specific gross-loan
+  // tags are unreliable). Scored on NPL coverage when nonaccruals are disclosed
+  // (often they aren't), otherwise shown for context without a score.
+  const allow = num(r0.allowanceForLoanLoss);
+  const loansNet = num(r0.loansNetOfAllowance);
+  const grossLoans = isFiniteNum(allow) && isFiniteNum(loansNet) ? loansNet + allow : NaN;
+  const reserveRatio = isFiniteNum(allow) && isFiniteNum(grossLoans) && grossLoans > 0 ? allow / grossLoans : NaN;
+  const npl = num(r0.nonaccrualLoans);
+  const nplCoverage = isFiniteNum(allow) && isFiniteNum(npl) && npl > 0 ? allow / npl : NaN;
+  const provRatio = isFiniteNum(num(r0.provisionForCreditLoss)) && isFiniteNum(grossLoans) && grossLoans > 0
+    ? num(r0.provisionForCreditLoss) / grossLoans : NaN;
+  if (isFiniteNum(reserveRatio) || isFiniteNum(nplCoverage)) {
+    comps.credit_quality = {
+      weight: 1,
+      score: isFiniteNum(nplCoverage) ? linMap(nplCoverage, 0.5, 2.5, 30, 95) : NaN,
+      raw: { reserve_ratio: nz(reserveRatio), npl_coverage: nz(nplCoverage), provision_ratio: nz(provRatio) },
+    };
+  }
+
+  const hasStatement = isFiniteNum(nim) || isFiniteNum(eff) || isFiniteNum(reserveRatio);
+  const confidence = hasStatement ? (records.length >= 3 ? "high" : "medium") : "low";
+
+  const present = Object.values(comps).filter((c) => isFiniteNum(c.score));
+  return {
+    composite_score: present.length ? composite(comps) : NaN,
+    piotroski_score: null, piotroski_sub: null, altman_z: null, altman_zone: "unknown",
+    roic_current: null, roic_10yr_avg: null, roic_trend: null,
+    earnings_quality: null, accrual_ratio: null, revenue_cv: null,
+    management_score: null, moat_score: null,
+    confidence,
+    component_detail: { ...comps, _basis: "financial" },
+    history_10yr: { roic: [], revenue: oldestFirst(series(records, "revenue")), gross_margin: [] },
   };
 }
 

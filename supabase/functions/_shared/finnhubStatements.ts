@@ -24,6 +24,19 @@ const TAGS: Record<string, string[]> = {
   longTermDebt: ["LongTermDebtNoncurrent", "LongTermDebt"],
   goodwill: ["Goodwill"],
   shares: ["WeightedAverageNumberOfDilutedSharesOutstanding", "WeightedAverageNumberOfSharesOutstandingBasic", "CommonStockSharesOutstanding"],
+  // ---- bank / lender line items (financial-sector quality scorer) ----
+  netInterestIncome: ["InterestIncomeExpenseNet", "InterestIncomeExpenseAfterProvisionForLoanLoss"],
+  interestIncome: ["InterestIncomeOperating", "InterestAndDividendIncomeOperating", "InterestAndFeeIncomeLoansAndLeases"],
+  noninterestExpense: ["NoninterestExpense"],
+  noninterestIncome: ["NoninterestIncome"],
+  // Total net revenue for a bank (net interest income + noninterest income). Its
+  // own tag so the efficiency ratio uses the right denominator — the generic
+  // `revenue` field can match a small fee-revenue line on some banks (e.g. WFC).
+  bankRevenue: ["RevenuesNetOfInterestExpense"],
+  allowanceForLoanLoss: ["FinancingReceivableAllowanceForCreditLossExcludingAccruedInterest", "FinancingReceivableAllowanceForCreditLosses", "LoansAndLeasesReceivableAllowance", "AllowanceForDoubtfulAccountsReceivable"],
+  loansNetOfAllowance: ["FinancingReceivableExcludingAccruedInterestAfterAllowanceForCreditLoss", "LoansAndLeasesReceivableNetReportedAmount", "NotesReceivableNet"],
+  provisionForCreditLoss: ["ProvisionForLoanLeaseAndOtherLosses", "ProvisionForLoanAndLeaseLosses", "ProvisionForDoubtfulAccounts"],
+  nonaccrualLoans: ["FinancingReceivableRecordedInvestmentNonaccrualStatus"],
 };
 
 // deno-lint-ignore no-explicit-any
@@ -71,6 +84,11 @@ export function parseFinnhubStatements(resp: unknown): AnnualRecord[] {
       equity: pick(r, TAGS.equity), retainedEarnings: pick(r, TAGS.retainedEarnings),
       longTermDebt: pick(r, TAGS.longTermDebt), goodwill: pick(r, TAGS.goodwill),
       shares: pick(r, TAGS.shares),
+      netInterestIncome: pick(r, TAGS.netInterestIncome), interestIncome: pick(r, TAGS.interestIncome),
+      noninterestExpense: pick(r, TAGS.noninterestExpense), noninterestIncome: pick(r, TAGS.noninterestIncome),
+      bankRevenue: pick(r, TAGS.bankRevenue), allowanceForLoanLoss: pick(r, TAGS.allowanceForLoanLoss),
+      loansNetOfAllowance: pick(r, TAGS.loansNetOfAllowance), provisionForCreditLoss: pick(r, TAGS.provisionForCreditLoss),
+      nonaccrualLoans: pick(r, TAGS.nonaccrualLoans),
     });
     if (recs.length >= 6) break;
   }

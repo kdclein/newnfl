@@ -354,12 +354,6 @@ Deno.serve(async (req) => {
         history: hist(S.vix_m), sort_order: 11,
       },
       {
-        id: "aaii", category: "sentiment", label: "AAII Bull–Bear Spread", value: null,
-        display: "n/a", norm: "≈ +6.5pp long-run", percentile: null, score: null, signal: "na",
-        explanation: "The AAII retail-investor survey is proprietary with no free programmatic feed, so it is shown as unavailable rather than approximated — the Sentiment Composite above covers this category with measurable substitutes.",
-        history: null, sort_order: 12,
-      },
-      {
         id: "breadth200", category: "sentiment", label: "% above 200-day MA", value: br200,
         display: br200 != null ? `${fmt(br200, 0)}%` : `accumulating`, norm: "~55–75% in healthy uptrends",
         percentile: null, score: sBr200, signal: sigOf(sBr200),

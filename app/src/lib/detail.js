@@ -11,6 +11,9 @@ const mult = (x, d = 1) =>
   x == null || Number.isNaN(Number(x)) ? "—" : `${Number(x).toFixed(d)}×`;
 const num = (x, d = 2) =>
   x == null || Number.isNaN(Number(x)) ? "—" : Number(x).toFixed(d);
+// For values already expressed in percent (Finnhub ROE/ROA: 16.32 == 16.32%).
+const pctRaw = (x, d = 1) =>
+  x == null || Number.isNaN(Number(x)) ? "—" : `${Number(x).toFixed(d)}%`;
 
 // Each component: key (matches component_detail), label, blurb (what it measures,
 // and which direction is good), and the raw metrics to surface.
@@ -52,6 +55,52 @@ export const QUALITY_META = [
     key: "competitive_position", label: "Competitive Position",
     blurb: "Gross margin level and trend — a proxy for pricing power and moat.",
     metrics: (r) => [["Gross margin", pct(r.gross_margin_current)], ["Margin trend / yr", pct(r.gross_margin_trend, 2)]],
+  },
+  // TTM-metric backstop only (names with no parseable statements): profitability
+  // and balance-sheet health stand in for the cash-flow / accrual components.
+  {
+    key: "profitability", label: "Profitability (TTM)",
+    blurb: "Net profit margin from the latest twelve months — a snapshot stand-in when full statements aren't available.",
+    metrics: (r) => [["Net margin", pct(r.net_margin)]],
+  },
+  {
+    key: "balance_health", label: "Balance-Sheet Health (TTM)",
+    blurb: "Current ratio and leverage from the latest snapshot — liquidity and solvency when full statements aren't available.",
+    metrics: (r) => [["Current ratio", num(r.current_ratio, 2)], ["Debt / equity", num(r.debt_to_equity, 2)]],
+  },
+];
+
+// Financial-sector quality components (banks / insurers / REITs). Keys match the
+// component_detail emitted by computeFinancialQuality.
+export const FINANCIAL_QUALITY_META = [
+  {
+    key: "roe", label: "Return on Equity",
+    blurb: "Profit earned on shareholders' equity — the headline profitability gauge for a financial. Higher is better; ~12%+ is strong for a bank.",
+    metrics: (r) => [["ROE", pctRaw(r.roe)]],
+  },
+  {
+    key: "roa", label: "Return on Assets",
+    blurb: "Profit per dollar of assets — how efficiently the balance sheet is deployed. ~1%+ is healthy for a bank.",
+    metrics: (r) => [["ROA", pctRaw(r.roa)]],
+  },
+  {
+    key: "nim", label: "Net Interest Margin",
+    blurb: "Net interest income over assets — the core spread a lender earns; asset yield shown for context. Higher is better.",
+    metrics: (r) => [["NIM", pct(r.nim)], ["Asset yield", pct(r.asset_yield)]],
+  },
+  {
+    key: "efficiency", label: "Efficiency Ratio",
+    blurb: "Noninterest expense over revenue — operating discipline. Lower is better; under ~60% is good.",
+    metrics: (r) => [["Efficiency", pct(r.efficiency_ratio)]],
+  },
+  {
+    key: "credit_quality", label: "Credit Quality & Reserves",
+    blurb: "Loan-loss allowance vs loans and nonperforming loans — the cushion against credit losses. Scored on NPL coverage when disclosed.",
+    metrics: (r) => [
+      ["Reserve / loans", pct(r.reserve_ratio)],
+      ["NPL coverage", r.npl_coverage == null ? "—" : mult(r.npl_coverage, 2)],
+      ["Provision / loans", pct(r.provision_ratio)],
+    ],
   },
 ];
 
@@ -152,6 +201,15 @@ export function naReason(key, sector) {
     case "earnings_quality": return "needs cash flow & net income";
     case "revenue_stability": return "needs multi-year revenue";
     case "management": return "no insider / goodwill data";
+    // financial-sector components
+    case "roe": return "no return-on-equity data";
+    case "roa": return "no return-on-assets data";
+    case "nim": return "no net-interest-income statement data";
+    case "efficiency": return "no noninterest-expense statement data";
+    case "credit_quality": return "no nonperforming-loan disclosure to score";
+    // ttm-metric backstop components
+    case "profitability": return "no margin data";
+    case "balance_health": return "no balance-sheet ratios";
     default: return "insufficient data";
   }
 }

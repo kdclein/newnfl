@@ -6,7 +6,7 @@
 // (SEC EDGAR was the original statements source but is blocked from edge egress.)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { CORS_HEADERS, fetchWithCache, getSecret, json, sleep } from "../_shared/cache.ts";
-import { computeQualityBackstop, computeQualityScore, computeValueScore } from "../_shared/scoring.ts";
+import { computeFinancialQuality, computeQualityBackstop, computeQualityScore, computeValueScore } from "../_shared/scoring.ts";
 import { parseFinnhubStatements } from "../_shared/finnhubStatements.ts";
 import { computeAltman, computeDCF, computePiotroski, computeRoicSeries } from "../_shared/fundamentals.ts";
 import { parseFinnhubMetric } from "../_shared/finnhub.ts";
@@ -127,18 +127,25 @@ Deno.serve(async (req) => {
       return json({ error: `no data source for ${ticker} (no SEC CIK and no FMP key)` }, 502);
     }
 
-    let quality = computeQualityScore({ income, balance, cashflow, metrics, ratios, score, insiders: insiders ?? undefined });
-
-    // Quality backstop: when the statement pipeline produces no usable score —
-    // either nothing parsed (ADRs/foreign filers, thinly-covered small caps), or
-    // only stale filings (Finnhub's free tier sometimes returns just a couple of
-    // years-old 10-Ks, e.g. Brown-Forman) — fall back to a TTM-metric quality
-    // read from Finnhub's `metric` feed. Marked "low" confidence in the engine.
-    const newestFy = records[0]?.fyEnd ? Number(records[0].fyEnd.slice(0, 4)) : NaN;
-    const statementsStale = isFiniteNum(newestFy) && (new Date().getUTCFullYear() - newestFy) > 2;
-    if (!isFiniteNum(quality.composite_score as number) || statementsStale) {
-      const qb = computeQualityBackstop(fh);
-      if (isFiniteNum(qb.composite_score as number)) quality = qb;
+    // Quality. Financials (banks / insurers / REITs) get a sector-specific scorer
+    // — the industrial metrics (Piotroski, Altman, ROIC, gross-margin moat, DCF)
+    // don't apply, so they're suppressed in favor of ROE/ROA, net interest margin,
+    // efficiency ratio, and reserve coverage. Everyone else uses the standard
+    // 7-component engine with the TTM-metric backstop for thin/stale statements.
+    let quality;
+    if (isFinancial) {
+      quality = computeFinancialQuality(fh, records, { excludeROE: wl?.sector === "Real Estate" });
+    } else {
+      quality = computeQualityScore({ income, balance, cashflow, metrics, ratios, score, insiders: insiders ?? undefined });
+      // Backstop: when the statement pipeline produces no usable score — nothing
+      // parsed (ADRs/foreign filers, thin small caps) or only stale filings (e.g.
+      // Brown-Forman's years-old 10-Ks) — fall back to a TTM-metric quality read.
+      const newestFy = records[0]?.fyEnd ? Number(records[0].fyEnd.slice(0, 4)) : NaN;
+      const statementsStale = isFiniteNum(newestFy) && (new Date().getUTCFullYear() - newestFy) > 2;
+      if (!isFiniteNum(quality.composite_score as number) || statementsStale) {
+        const qb = computeQualityBackstop(fh);
+        if (isFiniteNum(qb.composite_score as number)) quality = qb;
+      }
     }
 
     // Backstop: feed Finnhub's standalone valuation metrics (peTTM, FCF yield,
