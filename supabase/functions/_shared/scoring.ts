@@ -269,7 +269,10 @@ export function computeFinancialQuality(m: FinnhubMetrics, records: AnnualRecord
     comps.roe = { weight: 1, score: roeScore, raw: { roe: m.roe } };
   }
   if (isFiniteNum(m.roa)) {
-    const roaScore = isREIT ? linMap(m.roa!, 1, 14, 30, 95)
+    // REIT GAAP ROA is depressed by depreciation (FFO would be higher but isn't
+    // in the free feed), so most REITs land 0.5-3%; center the band there so they
+    // spread instead of bunching at the floor.
+    const roaScore = isREIT ? linMap(m.roa!, -1, 6, 20, 92)
       : isBank ? linMap(m.roa!, 0.3, 1.6, 20, 95)
       : linMap(m.roa!, 1, 16, 25, 95);
     comps.roa = { weight: 1, score: roaScore, raw: { roa: m.roa } };

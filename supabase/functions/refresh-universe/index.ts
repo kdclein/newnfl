@@ -142,13 +142,21 @@ Deno.serve(async (req) => {
       if (sr.ok) {
         const body = await sr.json() as Any;
         const rows = (body?.data?.table?.rows ?? []) as Any[];
+        // Nasdaq's screener mixes in non-common securities (preferred stock, baby
+        // bonds, debentures, trust preferreds, warrants/units/rights) that share
+        // the issuer's fundamentals and shouldn't be quality/value-scored as
+        // equities. Drop them by name; ADRs ("American Depositary Shares … Common
+        // Shares") are real common-equity proxies and are intentionally kept.
+        const NON_COMMON = /(debenture|subordinated|senior notes|notes due|% notes|fixed-to-floating|fixed-rate reset|preferred stock|preferred shares|trust preferred|\bwarrants?\b|\bunits?\b|\brights?\b)/i;
         const band: { ticker: string; name: string | null; mc: number }[] = [];
         for (const row of rows) {
           const ticker = cleanSym(String(row?.symbol ?? ""));
           if (!/^[A-Z]{1,5}$/.test(ticker)) continue; // skip warrants/units/preferreds
+          const nm = row?.name ? String(row.name).trim() : "";
+          if (NON_COMMON.test(nm)) continue; // skip non-common securities
           const mc = parseFloat(String(row?.marketCap ?? "").replace(/[$,]/g, ""));
           if (!Number.isFinite(mc) || mc < SC_MIN || mc > SC_MAX) continue;
-          band.push({ ticker, name: row?.name ? String(row.name).trim() : null, mc });
+          band.push({ ticker, name: nm || null, mc });
         }
         band.sort((a, b) => b.mc - a.mc);
         const picked = band.slice(0, SC_CAP);
