@@ -253,13 +253,25 @@ export function computeFinancialQuality(m: FinnhubMetrics, records: AnnualRecord
   // REITs are scored on ROA only: their book equity is eroded by depreciation, so
   // ROE is artificially inflated (often >100%) and not a quality signal. Also skip
   // any implausible ROE (>60%) as an equity-distortion artifact rather than merit.
+  // Profitability scales differ sharply by sub-type, so a single curve saturates
+  // one cohort: a 16% ROE / 1.2% ROA is elite for a *bank*, but a non-bank
+  // financial (insurer, asset manager, exchange) routinely runs ROE 20-40% / ROA
+  // 5-15%. One shared scale pegged ~60 profitable non-banks at the 95 ceiling (a
+  // flat line of dots). So split the ROE/ROA bands by bank (deposit-taker) vs
+  // non-bank vs REIT. `isBank`/`deposits`/`equity` are reused below for funding.
   const isREIT = !!opts?.excludeROE; // excludeROE is set only for Real Estate
+  const deposits = num(r0.deposits);
+  const equity = num(r0.equity);
+  const isBank = isFiniteNum(deposits) && deposits > 0;
   const roeOk = isFiniteNum(m.roe) && !isREIT && m.roe! <= 60;
-  if (roeOk) comps.roe = { weight: 1, score: linMap(m.roe!, 4, 16, 25, 95), raw: { roe: m.roe } };
+  if (roeOk) {
+    const roeScore = isBank ? linMap(m.roe!, 5, 16, 25, 92) : linMap(m.roe!, 8, 30, 30, 95);
+    comps.roe = { weight: 1, score: roeScore, raw: { roe: m.roe } };
+  }
   if (isFiniteNum(m.roa)) {
-    // REIT assets earn far more than a bank's (no deposit drag), so they need a
-    // higher ROA band or every REIT pegs the bank scale at 95.
-    const roaScore = isREIT ? linMap(m.roa!, 1, 8, 30, 95) : linMap(m.roa!, 0.4, 1.4, 25, 95);
+    const roaScore = isREIT ? linMap(m.roa!, 1, 14, 30, 95)
+      : isBank ? linMap(m.roa!, 0.3, 1.6, 20, 95)
+      : linMap(m.roa!, 1, 16, 25, 95);
     comps.roa = { weight: 1, score: roaScore, raw: { roa: m.roa } };
   }
 
@@ -306,9 +318,7 @@ export function computeFinancialQuality(m: FinnhubMetrics, records: AnnualRecord
   // isn't in the free feed) — more cushion is safer. Loan-to-deposit gauges
   // funding: a moderate ratio (~85%) is healthiest; far above ~100% leans on
   // flightier wholesale funding, far below means under-deployed deposits.
-  const deposits = num(r0.deposits);
-  const equity = num(r0.equity);
-  const isBank = isFiniteNum(deposits) && deposits > 0;
+  // (deposits / equity / isBank are declared with the profitability block above.)
   const capRatio = isFiniteNum(equity) && isFiniteNum(assets) && assets > 0 ? equity / assets : NaN;
   if (isBank && isFiniteNum(capRatio)) {
     comps.capital_adequacy = { weight: 1, score: linMap(capRatio, 0.05, 0.14, 25, 95), raw: { equity_to_assets: capRatio } };
