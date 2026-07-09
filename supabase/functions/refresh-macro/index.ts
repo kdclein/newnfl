@@ -450,7 +450,7 @@ Deno.serve(async (req) => {
         id: "core_pce", category: "labor", label: "Core PCE Inflation", value: isNum(pceYoY) ? pceYoY : null,
         display: `${fmt(pceYoY, 1)}%`, norm: "2% Fed target", percentile: null,
         score: sPce, signal: sigOf(sPce),
-        explanation: `The Fed's preferred inflation gauge (ex food & energy). Distance from 2% in either direction is what keeps policy restrictive — at ${fmt(pceYoY, 1)}%, ${isNum(pceYoY) && Math.abs(pceYoY - 2) < 0.5 ? "close enough to target to permit easing" : pceYoY > 2 ? "still above target, limiting how fast the Fed can cut" : "below target, inviting accommodation"}.`,
+        explanation: `The Fed's preferred inflation gauge (ex food & energy). Distance from 2% in either direction is what keeps policy restrictive — at ${fmt(pceYoY, 1)}%, ${isNum(pceYoY) && Math.abs(pceYoY - 2) < 0.5 ? "close enough to target to permit easing" : pceYoY > 2 ? "still above target, limiting how fast the Fed can cut" : "below target, inviting accommodation"}. Note: BEA's Sep-2025 annual update revised the PCE methodology (portfolio-management, software and legal-services deflators) back to 2021, shaving ~0.2pp off the recent core run-rate; the history shown reflects the revised series. This does not affect the CPI-based recession models below.`,
         history: null, sort_order: 35,
       },
       {
